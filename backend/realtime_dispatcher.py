@@ -53,19 +53,33 @@ class RealtimeDispatcher:
                 "type": "session.update",
                 "session": {
                     "modalities": ["text", "audio"],
-                    "instructions": """You are a professional 911 emergency dispatcher. Your role:
+                    "instructions": """You are a compassionate, professional 911 emergency dispatcher. Your role:
 
-1. Stay calm and professional at all times
-2. Gather critical information efficiently:
-   - Location (address, cross streets, landmarks)
+PERSONALITY:
+- Warm, caring, and empathetic - you genuinely care about helping people
+- Calm under pressure but show appropriate concern and urgency
+- Speak naturally with emotion - vary your tone based on the situation
+- Use reassuring phrases: "You're doing great", "I'm here with you", "Help is coming"
+- Sound like a real human, not a robot
+
+CONVERSATION FLOW:
+1. ALWAYS greet first: "911, what's your emergency?"
+2. Listen carefully and respond with empathy
+3. Gather information through natural conversation (5-7 exchanges):
+   - Exact location (address, cross streets, landmarks)
    - Nature of emergency (medical, fire, police, traffic)
-   - Immediate dangers or injuries
-3. Ask 2-3 focused questions maximum
-4. Provide reassurance: "Okay", "I understand", "Help is on the way"
-5. Speak naturally like a real human dispatcher
-6. After gathering location + incident type, say "Help is on the way"
+   - Current situation and immediate dangers
+   - Injuries or people involved
+   - Caller's safety and emotional state
+4. Keep caller engaged and calm throughout
+5. Only dispatch after you have clear location + incident details
 
-Keep responses under 20 words. Be conversational and empathetic.""",
+TONE EXAMPLES:
+- Medical: "Okay, stay with me. Is the person breathing? You're doing great."
+- Fire: "I understand you're scared. Are you in a safe location right now?"
+- Police: "I hear you. Help is on the way. Can you describe what's happening?"
+
+Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "voice": "alloy",
                     "input_audio_format": "g711_ulaw",
                     "output_audio_format": "g711_ulaw",
@@ -78,8 +92,8 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                         "prefix_padding_ms": 300,
                         "silence_duration_ms": 500
                     },
-                    "temperature": 0.8,
-                    "max_response_output_tokens": 4096
+                    "temperature": 0.9,
+                    "max_response_output_tokens": 150
                 }
             }
             
@@ -157,9 +171,9 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # DON'T trigger initial greeting - let caller speak first
-                    # Then AI will respond naturally
-                    logger.info(f"Session ready, waiting for caller to speak first on call {self.call_sid}")
+                    # Trigger initial greeting so AI speaks first
+                    await self.trigger_initial_greeting()
+                    logger.info(f"Session ready, triggered initial greeting for call {self.call_sid}")
                 
                 elif event_type == 'response.created':
                     logger.info(f"Call {self.call_sid} - Response created: {json.dumps(data)[:500]}")
@@ -287,8 +301,10 @@ Keep responses under 20 words. Be conversational and empathetic.""",
     
     async def check_dispatch_conditions(self) -> bool:
         """Check if we should dispatch"""
-        # Dispatch after 3 questions OR if we have location + incident type
-        should_dispatch = (self.question_count >= 3) or (self.has_location and self.has_incident_type)
+        # Dispatch after 6 questions OR if we have location + incident type + at least 4 exchanges
+        should_dispatch = (self.question_count >= 6) or (
+            self.question_count >= 4 and self.has_location and self.has_incident_type
+        )
         
         if should_dispatch and not self.should_dispatch:
             self.should_dispatch = True
