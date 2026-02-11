@@ -52,7 +52,7 @@ class RealtimeDispatcher:
             session_config = {
                 "type": "session.update",
                 "session": {
-                    "modalities": ["text", "audio"],
+                    "modalities": ["audio", "text"],  # Try audio first
                     "instructions": """You are a professional 911 emergency dispatcher. Your role:
 
 1. IMMEDIATELY greet the caller with: "911, what's your emergency?"
@@ -79,8 +79,8 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                         "prefix_padding_ms": 300,
                         "silence_duration_ms": 500
                     },
-                    "temperature": 0.7,
-                    "max_response_output_tokens": 150
+                    "temperature": 0.8,
+                    "max_response_output_tokens": 4096  # Increase token limit
                 }
             }
             
@@ -167,8 +167,10 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Session is ready - trigger initial greeting
-                    await self.trigger_initial_greeting()
+                    # Session is ready - DON'T trigger anything
+                    # Let the AI respond naturally when caller speaks
+                    # The instructions already tell it to greet first
+                    logger.info(f"Session ready for call {self.call_sid}, waiting for caller audio")
                 
                 elif event_type == 'response.created':
                     logger.info(f"Call {self.call_sid} - Response created: {json.dumps(data)[:500]}")

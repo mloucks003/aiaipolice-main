@@ -348,8 +348,6 @@ async def handle_incoming_call(
             logger.info(f"Initiating Realtime API for call {CallSid} with WebSocket URL: {ws_url}")
             
             # Return TwiML with Connect and Stream for Realtime API
-            from twilio.twiml.voice_response import Connect, Stream
-            
             connect = Connect()
             stream = Stream(url=ws_url)
             connect.append(stream)
