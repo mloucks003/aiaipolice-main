@@ -93,13 +93,9 @@ Keep responses under 20 words. Be conversational and empathetic.""",
     async def send_initial_greeting(self):
         """Send initial greeting after session is ready"""
         try:
-            # Trigger initial greeting from AI
+            # Trigger initial greeting from AI - simplified format
             initial_response = {
-                "type": "response.create",
-                "response": {
-                    "modalities": ["text", "audio"],
-                    "instructions": "Greet the caller with: '911, what's your emergency?'"
-                }
+                "type": "response.create"
             }
             await self.openai_ws.send(json.dumps(initial_response))
             logger.info(f"Initial greeting triggered for call {self.call_sid}")
@@ -207,8 +203,8 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     logger.error(f"OpenAI error for call {self.call_sid}: {error_msg}")
                 
                 else:
-                    # Log unknown events to help debug
-                    logger.debug(f"Call {self.call_sid} - Unhandled event type: {event_type}, data: {json.dumps(data)[:200]}")
+                    # Log ALL events to help debug audio issue
+                    logger.info(f"Call {self.call_sid} - Unhandled event type: {event_type}, data: {json.dumps(data)[:500]}")
                     
         except websockets.exceptions.ConnectionClosed:
             logger.warning(f"OpenAI connection closed for call {self.call_sid}")
