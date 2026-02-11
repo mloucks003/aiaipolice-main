@@ -103,8 +103,12 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                         "type": "input_audio_buffer.append",
                         "audio": data['media']['payload']  # base64 encoded audio
                     }
-                    if self.openai_ws and not self.openai_ws.closed:
-                        await self.openai_ws.send(json.dumps(audio_append))
+                    # Check if WebSocket is still open
+                    if self.openai_ws:
+                        try:
+                            await self.openai_ws.send(json.dumps(audio_append))
+                        except:
+                            break
                     
                 elif data['event'] == 'start':
                     self.stream_sid = data['start']['streamSid']
@@ -272,6 +276,9 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             import traceback
             traceback.print_exc()
         finally:
-            if self.openai_ws and not self.openai_ws.closed:
-                await self.openai_ws.close()
-                logger.info(f"OpenAI WebSocket closed for call {self.call_sid}")
+            if self.openai_ws:
+                try:
+                    await self.openai_ws.close()
+                    logger.info(f"OpenAI WebSocket closed for call {self.call_sid}")
+                except:
+                    pass

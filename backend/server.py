@@ -1325,9 +1325,12 @@ async def websocket_media_stream(websocket: WebSocket):
         import traceback
         traceback.print_exc()
     finally:
-        if dispatcher and dispatcher.openai_ws and not dispatcher.openai_ws.closed:
-            await dispatcher.openai_ws.close()
-            logger.info(f"Cleaned up OpenAI WebSocket for call {call_sid}")
+        if dispatcher and dispatcher.openai_ws:
+            try:
+                await dispatcher.openai_ws.close()
+                logger.info(f"Cleaned up OpenAI WebSocket for call {call_sid}")
+            except:
+                pass
 
 
 app.add_middleware(
