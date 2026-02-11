@@ -107,7 +107,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
     async def trigger_initial_greeting(self):
         """Send initial conversation item to make AI speak first - EXACTLY like Twilio example"""
         try:
-            # Send conversation item with greeting prompt
+            # Send conversation item with disclaimer and greeting prompt
             initial_conversation_item = {
                 "type": "conversation.item.create",
                 "item": {
@@ -116,7 +116,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "content": [
                         {
                             "type": "input_text",
-                            "text": "Greet the caller with '911, what's your emergency?'"
+                            "text": "Say: 'This is an AI test system built by Michael Loucks. 911, what's your emergency?'"
                         }
                     ]
                 }
