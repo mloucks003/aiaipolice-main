@@ -15,7 +15,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from openai import AsyncOpenAI
 from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse, Gather, Say, Record, Play
+from twilio.twiml.voice_response import VoiceResponse, Gather, Say, Record, Play, Connect, Stream
 import json
 from fine_codes import get_fine_amount
 from elevenlabs_helper import generate_voice_audio_sync
@@ -325,7 +325,7 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     To: str = Form(...)
 ):
-    """HYBRID: ElevenLabs realism + smart caching for speed (WORKING VERSION)"""
+    """OpenAI Realtime API with fallback to ElevenLabs"""
     # Create active call record
     active_call = ActiveCall(
         call_sid=CallSid,
@@ -335,6 +335,35 @@ async def handle_incoming_call(
     await db.active_calls.insert_one(active_call.model_dump())
     
     response = VoiceResponse()
+    
+    # Try to use OpenAI Realtime API if available
+    if OPENAI_API_KEY:
+        try:
+            # Get the host from the request
+            host = request.headers.get('host', 'law-enforcement-rms-b2749bfd89b0.herokuapp.com')
+            
+            # Use wss:// for WebSocket Secure
+            ws_url = f"wss://{host}/ws/media"
+            
+            logger.info(f"Initiating Realtime API for call {CallSid} with WebSocket URL: {ws_url}")
+            
+            # Return TwiML with Connect and Stream for Realtime API
+            from twilio.twiml.voice_response import Connect, Stream
+            
+            connect = Connect()
+            stream = Stream(url=ws_url)
+            connect.append(stream)
+            response.append(connect)
+            
+            logger.info(f"Returning TwiML with Media Streams for call {CallSid}")
+            return Response(content=str(response), media_type="application/xml")
+            
+        except Exception as e:
+            logger.error(f"Failed to initiate Realtime API for call {CallSid}: {e}")
+            # Fall through to ElevenLabs fallback
+    
+    # Fallback to ElevenLabs system
+    logger.info(f"Using ElevenLabs fallback for call {CallSid}")
     
     # Use Gather with optimized settings
     gather = Gather(
@@ -1260,6 +1289,7 @@ app.include_router(api_router)
 async def websocket_media_stream(websocket: WebSocket):
     """WebSocket endpoint for Twilio Media Streams + OpenAI Realtime API"""
     await websocket.accept()
+    logger.info("WebSocket connection accepted")
     
     call_sid = None
     dispatcher = None
@@ -1269,7 +1299,9 @@ async def websocket_media_stream(websocket: WebSocket):
         initial_message = await websocket.receive_text()
         data = json.loads(initial_message)
         
-        if data['event'] == 'start':
+        logger.info(f"Received initial WebSocket message: {data.get('event')}")
+        
+        if data.get('event') == 'start':
             call_sid = data['start']['callSid']
             logger.info(f"WebSocket connection established for call {call_sid}")
             
@@ -1282,10 +1314,13 @@ async def websocket_media_stream(websocket: WebSocket):
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for call {call_sid}")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error for call {call_sid}: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        if dispatcher and dispatcher.openai_ws:
+        if dispatcher and dispatcher.openai_ws and not dispatcher.openai_ws.closed:
             await dispatcher.openai_ws.close()
+            logger.info(f"Cleaned up OpenAI WebSocket for call {call_sid}")
 
 
 app.add_middleware(
