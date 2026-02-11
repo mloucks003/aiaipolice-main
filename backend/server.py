@@ -1295,21 +1295,28 @@ async def websocket_media_stream(websocket: WebSocket):
     dispatcher = None
     
     try:
-        # Get initial message with call info
-        initial_message = await websocket.receive_text()
-        data = json.loads(initial_message)
-        
-        logger.info(f"Received initial WebSocket message: {data.get('event')}")
-        
-        if data.get('event') == 'start':
-            call_sid = data['start']['callSid']
-            logger.info(f"WebSocket connection established for call {call_sid}")
+        # Wait for messages from Twilio
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            event_type = data.get('event')
             
-            # Create realtime dispatcher
-            dispatcher = RealtimeDispatcher(call_sid, db)
+            logger.info(f"Received WebSocket message: {event_type}")
             
-            # Run the bidirectional audio streaming
-            await dispatcher.run(websocket)
+            if event_type == 'start':
+                call_sid = data['start']['callSid']
+                logger.info(f"Media stream started for call {call_sid}")
+                
+                # Create realtime dispatcher
+                dispatcher = RealtimeDispatcher(call_sid, db)
+                
+                # Run the bidirectional audio streaming
+                await dispatcher.run(websocket)
+                break
+                
+            elif event_type == 'connected':
+                logger.info("Twilio Media Streams connected, waiting for start event")
+                continue
             
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for call {call_sid}")
