@@ -14,7 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
 class RealtimeDispatcher:
     """Handles real-time voice conversation between caller and OpenAI"""
