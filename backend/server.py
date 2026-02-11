@@ -324,7 +324,7 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     To: str = Form(...)
 ):
-    """OPTIMIZED: Fast 911 response with Twilio TTS (no delay)."""
+    """OPTIMIZED: Ultra-realistic ElevenLabs voice with smart caching."""
     # Create active call record
     active_call = ActiveCall(
         call_sid=CallSid,
@@ -339,7 +339,7 @@ async def handle_incoming_call(
     gather = Gather(
         input='speech',
         timeout=4,
-        speech_timeout=2,  # Faster detection
+        speech_timeout=2,
         action='/api/webhooks/process-speech',
         method='POST',
         language='en-US',
@@ -348,13 +348,24 @@ async def handle_incoming_call(
         speech_model='phone_call'
     )
     
-    # Use Twilio TTS for INSTANT response (no ElevenLabs delay)
-    gather.say("911, what's your emergency?", voice='Polly.Joanna')
+    # Use CACHED ElevenLabs audio for instant playback
+    greeting = "911, what's your emergency?"
+    audio_url = generate_voice_audio_sync(greeting)
+    if audio_url:
+        gather.play(audio_url)
+    else:
+        gather.say(greeting, voice='Polly.Joanna')
     
     response.append(gather)
     
     # Fallback
-    response.say("I'm sorry, I didn't catch that. What's happening?", voice='Polly.Joanna')
+    fallback = "I'm sorry, I didn't catch that. What's happening?"
+    fallback_url = generate_voice_audio_sync(fallback)
+    if fallback_url:
+        response.play(fallback_url)
+    else:
+        response.say(fallback, voice='Polly.Joanna')
+    
     response.redirect('/api/webhooks/voice', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
@@ -365,12 +376,16 @@ async def process_speech(
     SpeechResult: str = Form(None),
     Confidence: float = Form(None)
 ):
-    """OPTIMIZED: Fast, efficient 911 dispatcher with smart AI."""
+    """HYBRID: ElevenLabs for realism + smart caching for speed."""
     response = VoiceResponse()
     
     if not SpeechResult:
-        # Use Twilio TTS for instant response (no delay)
-        response.say("I didn't catch that. What's your emergency?", voice='Polly.Joanna')
+        # Use cached ElevenLabs
+        audio_url = generate_voice_audio_sync("I didn't catch that. What's your emergency?")
+        if audio_url:
+            response.play(audio_url)
+        else:
+            response.say("I didn't catch that. What's your emergency?", voice='Polly.Joanna')
         response.redirect('/api/webhooks/voice', method='POST')
         return Response(content=str(response), media_type="application/xml")
     
@@ -380,8 +395,8 @@ async def process_speech(
         conversation_history = call.get('transcription', '') if call else ''
         question_count = conversation_history.count('\n') if conversation_history else 0
         
-        # SMART AI PROMPT - Efficient dispatcher behavior
-        ai_prompt = f'''You are a professional 911 dispatcher. Analyze this call efficiently:
+        # SMART AI PROMPT - Efficient dispatcher with natural responses
+        ai_prompt = f'''You are a professional 911 dispatcher. Analyze this call:
 
 CALLER: "{SpeechResult}"
 PREVIOUS: "{conversation_history}"
@@ -390,29 +405,33 @@ QUESTIONS ASKED: {question_count}
 CRITICAL RULES:
 1. After 2-3 questions, you MUST dispatch (set is_complete=true)
 2. Only ask about MISSING critical info: location, incident type, immediate danger
-3. Be reassuring: "Okay", "I understand", "Help is on the way"
-4. Keep responses under 15 words
-5. NEVER ask more than 3 questions total
+3. Be reassuring and natural: "Okay", "I understand", "Alright", "Got it"
+4. Keep responses conversational and under 20 words
+5. Sound like a real human dispatcher - use natural speech patterns
 
 Return JSON:
 {{
   "incident_type": "Medical"|"Fire"|"Police"|"Traffic"|"Other",
   "location": "extracted address or 'unknown'",
   "priority": 1-5,
-  "has_location": true/false,
-  "has_incident_type": true/false,
-  "dispatcher_response": "short reassuring response + question if needed",
+  "dispatcher_response": "natural, reassuring response with question if needed",
   "is_complete": true/false (TRUE after 2-3 exchanges OR if you have location + incident type)
-}}'''
+}}
+
+Example responses:
+- "Okay, what's your location?"
+- "Alright, I understand. Where are you right now?"
+- "Got it. Is anyone injured?"
+- "Okay, help is on the way. Stay with me."'''
         
         ai_response_obj = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an efficient 911 dispatcher. Gather info quickly, reassure caller, dispatch fast."},
+                {"role": "system", "content": "You are a calm, professional 911 dispatcher. Speak naturally like a real human."},
                 {"role": "user", "content": ai_prompt}
             ],
-            temperature=0.3,
-            max_tokens=200  # Faster response
+            temperature=0.5,  # More natural variation
+            max_tokens=150
         )
         ai_response = ai_response_obj.choices[0].message.content
         
@@ -420,12 +439,11 @@ Return JSON:
             clean = ai_response.strip().replace('```json', '').replace('```', '').strip()
             details = json.loads(clean)
         except:
-            # Fallback - dispatch after 3 questions
             details = {
                 "incident_type": "Other",
                 "location": "unknown",
                 "priority": 3,
-                "dispatcher_response": "Okay, I'm sending help now. Stay on the line.",
+                "dispatcher_response": "Okay, help is on the way. Stay on the line.",
                 "is_complete": question_count >= 2
             }
         
@@ -449,13 +467,18 @@ Return JSON:
             }}
         )
         
-        # DISPATCH or CONTINUE
+        # DISPATCH or CONTINUE with ElevenLabs
         if details.get("is_complete", False):
-            # Use Twilio TTS for instant response
-            response.say("Okay, help is on the way. Stay on the line.", voice='Polly.Joanna')
+            # Use ElevenLabs for natural dispatch message
+            dispatch_msg = "Okay, help is on the way. Stay on the line."
+            audio_url = generate_voice_audio_sync(dispatch_msg)
+            if audio_url:
+                response.play(audio_url)
+            else:
+                response.say(dispatch_msg, voice='Polly.Joanna')
             response.redirect('/api/webhooks/hold-caller', method='POST')
         else:
-            # Continue with next question - Use Twilio TTS for speed
+            # Continue with ElevenLabs for realistic conversation
             gather = Gather(
                 input='speech',
                 timeout=4,
@@ -467,15 +490,33 @@ Return JSON:
             )
             
             dispatcher_response = details.get("dispatcher_response", "What's your location?")
-            gather.say(dispatcher_response, voice='Polly.Joanna')
+            # Generate with ElevenLabs (will be cached if repeated)
+            audio_url = generate_voice_audio_sync(dispatcher_response)
+            if audio_url:
+                gather.play(audio_url)
+            else:
+                gather.say(dispatcher_response, voice='Polly.Joanna')
             
             response.append(gather)
-            response.say("Are you there?", voice='Polly.Joanna')
+            
+            # Fallback
+            fallback_msg = "Are you there?"
+            fallback_url = generate_voice_audio_sync(fallback_msg)
+            if fallback_url:
+                response.play(fallback_url)
+            else:
+                response.say(fallback_msg, voice='Polly.Joanna')
             response.redirect('/api/webhooks/process-speech', method='POST')
         
     except Exception as e:
         logger.error(f"Speech processing error: {e}")
-        response.say("I have your information. Help is on the way.", voice='Polly.Joanna')
+        # Fallback with ElevenLabs
+        error_msg = "I have your information. Help is on the way."
+        audio_url = generate_voice_audio_sync(error_msg)
+        if audio_url:
+            response.play(audio_url)
+        else:
+            response.say(error_msg, voice='Polly.Joanna')
         response.redirect('/api/webhooks/hold-caller', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
