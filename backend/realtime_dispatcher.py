@@ -48,22 +48,23 @@ class RealtimeDispatcher:
             
             logger.info(f"WebSocket connected for call {self.call_sid}")
             
-            # Configure the session
+            # Configure the session with server VAD enabled
             session_config = {
                 "type": "session.update",
                 "session": {
                     "modalities": ["text", "audio"],
                     "instructions": """You are a professional 911 emergency dispatcher. Your role:
 
-1. Stay calm and professional at all times
-2. Gather critical information efficiently:
+1. IMMEDIATELY greet the caller with: "911, what's your emergency?"
+2. Stay calm and professional at all times
+3. Gather critical information efficiently:
    - Location (address, cross streets, landmarks)
    - Nature of emergency (medical, fire, police, traffic)
    - Immediate dangers or injuries
-3. Ask 2-3 focused questions maximum
-4. Provide reassurance: "Okay", "I understand", "Help is on the way"
-5. Speak naturally like a real human dispatcher
-6. After gathering location + incident type, dispatch immediately
+4. Ask 2-3 focused questions maximum
+5. Provide reassurance: "Okay", "I understand", "Help is on the way"
+6. Speak naturally like a real human dispatcher
+7. After gathering location + incident type, say "Help is on the way"
 
 Keep responses under 20 words. Be conversational and empathetic.""",
                     "voice": "alloy",  # Professional female voice
@@ -72,7 +73,12 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": None,  # Disable server VAD - we'll control manually
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 500
+                    },
                     "temperature": 0.7,
                     "max_response_output_tokens": 150
                 }
@@ -86,9 +92,9 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             raise
     
     async def trigger_initial_greeting(self):
-        """Trigger initial greeting by adding a conversation item"""
+        """Trigger initial greeting by creating a conversation item and response"""
         try:
-            # Add a system message to trigger the greeting
+            # Add a user message to give context for the greeting
             conversation_item = {
                 "type": "conversation.item.create",
                 "item": {
@@ -97,33 +103,26 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     "content": [
                         {
                             "type": "input_text",
-                            "text": "[Call connected]"
+                            "text": "Call just connected. Greet the caller."
                         }
                     ]
                 }
             }
             await self.openai_ws.send(json.dumps(conversation_item))
+            logger.info(f"Conversation item created for call {self.call_sid}")
             
-            # Now trigger a response
+            # Now trigger a response with explicit response configuration
             response_create = {
-                "type": "response.create"
+                "type": "response.create",
+                "response": {
+                    "modalities": ["text", "audio"],
+                    "instructions": "Greet the caller with: 911, what's your emergency?"
+                }
             }
             await self.openai_ws.send(json.dumps(response_create))
-            logger.info(f"Initial greeting triggered for call {self.call_sid}")
+            logger.info(f"Initial greeting response triggered for call {self.call_sid}")
         except Exception as e:
             logger.error(f"Failed to trigger initial greeting for call {self.call_sid}: {e}")
-    
-    async def send_initial_greeting(self):
-        """Send initial greeting after session is ready"""
-        try:
-            # Trigger initial greeting from AI - simplified format
-            initial_response = {
-                "type": "response.create"
-            }
-            await self.openai_ws.send(json.dumps(initial_response))
-            logger.info(f"Initial greeting triggered for call {self.call_sid}")
-        except Exception as e:
-            logger.error(f"Failed to send initial greeting for call {self.call_sid}: {e}")
         
     async def handle_twilio_audio(self, twilio_ws: WebSocket):
         """Handle incoming audio from Twilio and send to OpenAI"""
@@ -171,13 +170,27 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Session is ready - add a conversation item to trigger greeting
+                    # Session is ready - trigger initial greeting
                     await self.trigger_initial_greeting()
+                
+                elif event_type == 'response.created':
+                    logger.info(f"Call {self.call_sid} - Response created: {json.dumps(data)[:500]}")
+                
+                elif event_type == 'response.output_item.added':
+                    logger.info(f"Call {self.call_sid} - Output item added: {json.dumps(data)[:500]}")
+                
+                elif event_type == 'response.content_part.added':
+                    logger.info(f"Call {self.call_sid} - Content part added: {json.dumps(data)[:500]}")
+                
+                elif event_type == 'response.audio_transcript.delta':
+                    # Log what the AI is saying
+                    transcript_delta = data.get('delta', '')
+                    if transcript_delta:
+                        logger.info(f"Call {self.call_sid} - AI speaking: {transcript_delta}")
                 
                 elif event_type == 'response.audio.delta':
                     # Stream audio back to Twilio
-                    # Try different possible field names
-                    audio_data = data.get('delta') or data.get('audio') or (data.get('response', {}).get('audio'))
+                    audio_data = data.get('delta')
                     if audio_data and self.stream_sid:
                         logger.info(f"Call {self.call_sid} - Sending audio chunk to Twilio (length: {len(audio_data)})")
                         twilio_message = {
@@ -193,19 +206,12 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     elif not audio_data:
                         logger.warning(f"Call {self.call_sid} - No audio data in delta event: {json.dumps(data)[:200]}")
                 
-                elif event_type == 'response.audio_transcript.delta':
-                    # Alternative audio event name
-                    audio_data = data.get('delta')
-                    if audio_data and self.stream_sid:
-                        logger.info(f"Call {self.call_sid} - Sending audio (transcript.delta) to Twilio")
-                        twilio_message = {
-                            "event": "media",
-                            "streamSid": self.stream_sid,
-                            "media": {
-                                "payload": audio_data
-                            }
-                        }
-                        await twilio_ws.send_text(json.dumps(twilio_message))
+                elif event_type == 'response.audio_transcript.done':
+                    # Full transcript of what AI said
+                    transcript = data.get('transcript', '')
+                    if transcript:
+                        self.conversation_history.append(f"Dispatcher: {transcript}")
+                        logger.info(f"Call {self.call_sid} - AI said: {transcript}")
                         
                 elif event_type == 'conversation.item.input_audio_transcription.completed':
                     # Log what caller said
