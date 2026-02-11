@@ -89,6 +89,22 @@ Keep responses under 20 words. Be conversational and empathetic.""",
         except Exception as e:
             logger.error(f"Failed to connect to OpenAI for call {self.call_sid}: {e}")
             raise
+    
+    async def send_initial_greeting(self):
+        """Send initial greeting after session is ready"""
+        try:
+            # Trigger initial greeting from AI
+            initial_response = {
+                "type": "response.create",
+                "response": {
+                    "modalities": ["text", "audio"],
+                    "instructions": "Greet the caller with: '911, what's your emergency?'"
+                }
+            }
+            await self.openai_ws.send(json.dumps(initial_response))
+            logger.info(f"Initial greeting triggered for call {self.call_sid}")
+        except Exception as e:
+            logger.error(f"Failed to send initial greeting for call {self.call_sid}: {e}")
         
     async def handle_twilio_audio(self, twilio_ws: WebSocket):
         """Handle incoming audio from Twilio and send to OpenAI"""
@@ -113,6 +129,7 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                 elif data['event'] == 'start':
                     self.stream_sid = data['start']['streamSid']
                     logger.info(f"Media stream started for call {self.call_sid}, stream {self.stream_sid}")
+                    logger.info(f"Start event data: {json.dumps(data, indent=2)}")
                     
                 elif data['event'] == 'stop':
                     logger.info(f"Media stream stopped for call {self.call_sid}")
@@ -128,16 +145,22 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                 data = json.loads(message)
                 event_type = data.get('type')
                 
+                logger.info(f"Call {self.call_sid} - OpenAI event: {event_type}")
+                
                 if event_type == 'session.created':
                     logger.info(f"OpenAI session created for call {self.call_sid}")
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
+                    # Now that session is ready, send initial greeting
+                    await self.send_initial_greeting()
                 
                 elif event_type == 'response.audio.delta':
                     # Stream audio back to Twilio
-                    audio_data = data.get('delta')
+                    # Try different possible field names
+                    audio_data = data.get('delta') or data.get('audio') or (data.get('response', {}).get('audio'))
                     if audio_data and self.stream_sid:
+                        logger.info(f"Call {self.call_sid} - Sending audio chunk to Twilio (length: {len(audio_data)})")
                         twilio_message = {
                             "event": "media",
                             "streamSid": self.stream_sid,
@@ -146,6 +169,10 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                             }
                         }
                         await twilio_ws.send_text(json.dumps(twilio_message))
+                    elif not self.stream_sid:
+                        logger.warning(f"Call {self.call_sid} - No stream_sid available, cannot send audio")
+                    elif not audio_data:
+                        logger.warning(f"Call {self.call_sid} - No audio data in delta event: {json.dumps(data)[:200]}")
                         
                 elif event_type == 'conversation.item.input_audio_transcription.completed':
                     # Log what caller said
@@ -178,6 +205,10 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                 elif event_type == 'error':
                     error_msg = data.get('error', {})
                     logger.error(f"OpenAI error for call {self.call_sid}: {error_msg}")
+                
+                else:
+                    # Log unknown events to help debug
+                    logger.debug(f"Call {self.call_sid} - Unhandled event type: {event_type}, data: {json.dumps(data)[:200]}")
                     
         except websockets.exceptions.ConnectionClosed:
             logger.warning(f"OpenAI connection closed for call {self.call_sid}")
