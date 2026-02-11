@@ -88,12 +88,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.8,  # Higher threshold = less sensitive to background noise
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 2000  # Longer silence before considering speech done
-                    },
+                    "turn_detection": None,  # Disable server VAD to prevent cutoffs
                     "temperature": 0.9,
                     "max_response_output_tokens": 150
                 }
