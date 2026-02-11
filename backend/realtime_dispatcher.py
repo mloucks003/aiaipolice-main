@@ -148,8 +148,7 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Now that session is ready, send initial greeting
-                    await self.send_initial_greeting()
+                    # Session is ready - VAD will handle responses automatically
                 
                 elif event_type == 'response.audio.delta':
                     # Stream audio back to Twilio
@@ -169,6 +168,20 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                         logger.warning(f"Call {self.call_sid} - No stream_sid available, cannot send audio")
                     elif not audio_data:
                         logger.warning(f"Call {self.call_sid} - No audio data in delta event: {json.dumps(data)[:200]}")
+                
+                elif event_type == 'response.audio_transcript.delta':
+                    # Alternative audio event name
+                    audio_data = data.get('delta')
+                    if audio_data and self.stream_sid:
+                        logger.info(f"Call {self.call_sid} - Sending audio (transcript.delta) to Twilio")
+                        twilio_message = {
+                            "event": "media",
+                            "streamSid": self.stream_sid,
+                            "media": {
+                                "payload": audio_data
+                            }
+                        }
+                        await twilio_ws.send_text(json.dumps(twilio_message))
                         
                 elif event_type == 'conversation.item.input_audio_transcription.completed':
                     # Log what caller said
