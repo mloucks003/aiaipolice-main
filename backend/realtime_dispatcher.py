@@ -33,16 +33,15 @@ class RealtimeDispatcher:
     async def connect_to_openai(self):
         """Connect to OpenAI Realtime API"""
         try:
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=v1"
-            }
-            
             logger.info(f"Connecting to OpenAI Realtime API for call {self.call_sid}")
             
+            # websockets 15.x uses additional_headers instead of extra_headers
             self.openai_ws = await websockets.connect(
                 OPENAI_REALTIME_URL,
-                extra_headers=headers,
+                additional_headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "OpenAI-Beta": "realtime=v1"
+                },
                 ping_interval=20,
                 ping_timeout=10
             )
