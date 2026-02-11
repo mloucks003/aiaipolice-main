@@ -1290,6 +1290,7 @@ async def websocket_media_stream(websocket: WebSocket):
     logger.info("WebSocket connection accepted")
     
     call_sid = None
+    stream_sid = None
     dispatcher = None
     
     try:
@@ -1303,10 +1304,11 @@ async def websocket_media_stream(websocket: WebSocket):
             
             if event_type == 'start':
                 call_sid = data['start']['callSid']
-                logger.info(f"Media stream started for call {call_sid}")
+                stream_sid = data['start']['streamSid']
+                logger.info(f"Media stream started for call {call_sid}, stream {stream_sid}")
                 
-                # Create realtime dispatcher
-                dispatcher = RealtimeDispatcher(call_sid, db)
+                # Create realtime dispatcher with stream_sid
+                dispatcher = RealtimeDispatcher(call_sid, db, stream_sid)
                 
                 # Run the bidirectional audio streaming
                 await dispatcher.run(websocket)
@@ -1328,6 +1330,7 @@ async def websocket_media_stream(websocket: WebSocket):
                 await dispatcher.openai_ws.close()
                 logger.info(f"Cleaned up OpenAI WebSocket for call {call_sid}")
             except:
+                pass
                 pass
 
 

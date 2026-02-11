@@ -19,11 +19,11 @@ OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 class RealtimeDispatcher:
     """Handles real-time voice conversation between caller and OpenAI"""
     
-    def __init__(self, call_sid: str, db):
+    def __init__(self, call_sid: str, db, stream_sid: str):
         self.call_sid = call_sid
         self.db = db
         self.openai_ws = None
-        self.stream_sid = None
+        self.stream_sid = stream_sid  # Set immediately from constructor
         self.conversation_history = []
         self.question_count = 0
         self.has_location = False
@@ -135,10 +135,6 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                             await self.openai_ws.send(json.dumps(audio_append))
                         except:
                             break
-                    
-                elif data['event'] == 'start':
-                    # Already handled in wait_for_stream_start, skip
-                    continue
                     
                 elif data['event'] == 'stop':
                     logger.info(f"Media stream stopped for call {self.call_sid}")
@@ -322,33 +318,13 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             
             logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}")
             
-    async def wait_for_stream_start(self, twilio_ws: WebSocket):
-        """Wait for Twilio to send the 'start' event with stream_sid"""
-        try:
-            while True:
-                message = await twilio_ws.receive_text()
-                data = json.loads(message)
-                
-                if data['event'] == 'start':
-                    self.stream_sid = data['start']['streamSid']
-                    logger.info(f"Media stream started for call {self.call_sid}, stream {self.stream_sid}")
-                    logger.info(f"Start event data: {json.dumps(data, indent=2)}")
-                    return  # Stream started, we can proceed
-                    
-        except Exception as e:
-            logger.error(f"Error waiting for stream start for call {self.call_sid}: {e}")
-            raise
-    
     async def run(self, twilio_ws: WebSocket):
         """Main loop - bidirectional audio streaming"""
         try:
             await self.connect_to_openai()
             
-            # CRITICAL: Wait for Twilio stream to start and get stream_sid FIRST
-            # Otherwise we can't send audio back to caller
-            await self.wait_for_stream_start(twilio_ws)
-            
-            # Now run both handlers concurrently
+            # Run both handlers concurrently
+            # stream_sid is already set from constructor
             await asyncio.gather(
                 self.handle_twilio_audio(twilio_ws),
                 self.handle_openai_responses(twilio_ws)
