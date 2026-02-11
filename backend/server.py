@@ -338,25 +338,25 @@ async def handle_incoming_call(
     # Use Gather with OPTIMIZED settings for natural conversation
     gather = Gather(
         input='speech',
-        timeout=6,  # 6 seconds to start speaking (relaxed, human-like)
-        speech_timeout='auto',  # Auto-detect when they stop speaking (best for natural conversation)
+        timeout=4,  # 4 seconds to start speaking
+        speech_timeout=3,  # 3 seconds of silence to detect end (more natural)
         action='/api/webhooks/process-speech',
         method='POST',
         language='en-US',
         hints='police, fire, medical, emergency, accident, robbery, assault, shooting, stabbing, heart attack, unconscious, help, scared, dying, bleeding, gun, knife, fire, smoke',
         profanity_filter=False,  # Don't filter during emergencies
-        speech_model='phone_call'  # Optimized for phone calls, reduces background noise
+        speech_model='phone_call'  # Optimized for phone calls
     )
     
-    # Natural dispatcher greeting
-    greeting = "Non-emergency line. AI test system. What can I help you with?"
+    # Natural dispatcher greeting - slower, more professional
+    greeting = "911, what's your emergency?"
     audio_url = generate_voice_audio_sync(greeting)
     gather.play(audio_url)
     
     response.append(gather)
     
-    # Fallback
-    fallback_url = generate_voice_audio_sync("Didn't catch that. Go ahead.")
+    # Fallback - more patient
+    fallback_url = generate_voice_audio_sync("I'm sorry, I didn't catch that. Can you tell me what's happening?")
     response.play(fallback_url)
     response.redirect('/api/webhooks/voice', method='POST')
     

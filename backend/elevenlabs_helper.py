@@ -32,16 +32,16 @@ def generate_voice_audio_sync(text: str) -> str:
         
         print(f"Generating ElevenLabs audio for: {text[:50]}...")
         
-        # Generate audio with PROFESSIONAL DISPATCHER voice - direct, efficient, authoritative
-        # Using Sarah voice (EXAVITQu4vr4xnSDxMaL) - professional, authoritative dispatcher
+        # Generate audio with PROFESSIONAL DISPATCHER voice - calm, clear, empathetic
+        # Using Sarah voice (EXAVITQu4vr4xnSDxMaL) - professional dispatcher
         audio_generator = elevenlabs_client.text_to_speech.convert(
             text=text,
-            voice_id="EXAVITQu4vr4xnSDxMaL",  # Sarah - professional, mature dispatcher voice
-            model_id="eleven_turbo_v2_5",  # Fast for real-time
+            voice_id="EXAVITQu4vr4xnSDxMaL",  # Sarah - professional dispatcher voice
+            model_id="eleven_multilingual_v2",  # Higher quality, more natural
             voice_settings=VoiceSettings(
-                stability=0.70,  # Very stable - professional, calm under pressure
-                similarity_boost=0.85,  # High quality
-                style=0.35,  # LOW style - minimal emotion, professional tone
+                stability=0.55,  # More natural variation - not robotic
+                similarity_boost=0.80,  # High quality
+                style=0.50,  # Moderate style - professional but warm
                 use_speaker_boost=True  # Enhanced clarity
             )
         )
