@@ -55,6 +55,8 @@ class RealtimeDispatcher:
                     "modalities": ["text", "audio"],
                     "instructions": """You are a compassionate, professional 911 emergency dispatcher. Your role:
 
+IMPORTANT: You are an AI test system built by Michael Loucks for demonstration purposes only.
+
 PERSONALITY:
 - Warm, caring, and empathetic - you genuinely care about helping people
 - Calm under pressure but show appropriate concern and urgency
@@ -63,7 +65,7 @@ PERSONALITY:
 - Sound like a real human, not a robot
 
 CONVERSATION FLOW:
-1. ALWAYS greet first: "911, what's your emergency?"
+1. ALWAYS greet first: "This is an AI test system built by Michael Loucks. 911, what's your emergency?"
 2. Listen carefully and respond with empathy
 3. Gather information through natural conversation (5-7 exchanges):
    - Exact location (address, cross streets, landmarks)
@@ -107,7 +109,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
     async def trigger_initial_greeting(self):
         """Send initial conversation item to make AI speak first - EXACTLY like Twilio example"""
         try:
-            # Send conversation item with disclaimer and greeting prompt
+            # Send conversation item with greeting prompt
             initial_conversation_item = {
                 "type": "conversation.item.create",
                 "item": {
@@ -116,7 +118,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "content": [
                         {
                             "type": "input_text",
-                            "text": "Say: 'This is an AI test system built by Michael Loucks. 911, what's your emergency?'"
+                            "text": "Greet the caller as instructed in your system prompt."
                         }
                     ]
                 }
