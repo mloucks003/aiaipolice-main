@@ -2,7 +2,7 @@
 
 A comprehensive Law Enforcement Records Management System with AI-powered features, built with FastAPI, React, MongoDB, and advanced AI integrations.
 
-> **Note**: This project has been converted from Emergent to a standalone application. See `MIGRATION_NOTES.md` for details.
+> **Note**: This project has been converted from to a standalone application. See `MIGRATION_NOTES.md` for details.
 
 ## 🚀 Quick Start
 
