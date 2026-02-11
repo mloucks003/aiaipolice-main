@@ -92,35 +92,32 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             raise
     
     async def trigger_initial_greeting(self):
-        """Trigger initial greeting by creating a conversation item and response"""
+        """Trigger initial greeting by injecting an assistant message"""
         try:
-            # Add a user message to give context for the greeting
-            conversation_item = {
+            # Instead of asking AI to generate, directly inject the greeting as an assistant message
+            # This will be played back to the caller
+            greeting_item = {
                 "type": "conversation.item.create",
                 "item": {
                     "type": "message",
-                    "role": "user",
+                    "role": "assistant",
                     "content": [
                         {
-                            "type": "input_text",
-                            "text": "Call just connected. Greet the caller."
+                            "type": "text",
+                            "text": "911, what's your emergency?"
                         }
                     ]
                 }
             }
-            await self.openai_ws.send(json.dumps(conversation_item))
-            logger.info(f"Conversation item created for call {self.call_sid}")
+            await self.openai_ws.send(json.dumps(greeting_item))
+            logger.info(f"Injected greeting message for call {self.call_sid}")
             
-            # Now trigger a response with explicit response configuration
+            # Now trigger response generation to convert text to audio
             response_create = {
-                "type": "response.create",
-                "response": {
-                    "modalities": ["text", "audio"],
-                    "instructions": "Greet the caller with: 911, what's your emergency?"
-                }
+                "type": "response.create"
             }
             await self.openai_ws.send(json.dumps(response_create))
-            logger.info(f"Initial greeting response triggered for call {self.call_sid}")
+            logger.info(f"Triggered audio generation for greeting on call {self.call_sid}")
         except Exception as e:
             logger.error(f"Failed to trigger initial greeting for call {self.call_sid}: {e}")
         
