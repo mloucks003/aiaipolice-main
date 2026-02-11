@@ -368,104 +368,48 @@ async def process_speech(
     SpeechResult: str = Form(None),
     Confidence: float = Form(None)
 ):
-    """Process speech in real-time and ask follow-up questions."""
+    """Process speech and ask intelligent follow-up questions."""
     response = VoiceResponse()
     
     if not SpeechResult:
-        # Didn't hear - ask again
-        audio_url = generate_voice_audio_sync("I didn't catch that. Could you repeat your emergency?")
+        audio_url = generate_voice_audio_sync("I didn't catch that. Can you tell me what's happening?")
         response.play(audio_url)
         response.redirect('/api/webhooks/voice', method='POST')
         return Response(content=str(response), media_type="application/xml")
     
     try:
-        # EMERGENCY DETECTION - Identify if this is a true emergency
-        emergency_prompt = f'''Analyze: "{SpeechResult}"
+        # Get current call data
+        call = await db.active_calls.find_one({"call_sid": CallSid}, {"_id": 0})
+        
+        # Use AI to determine what to ask next
+        conversation_history = call.get('transcription', '') if call else ''
+        
+        ai_prompt = f'''You are a 911 dispatcher. Based on this conversation:
 
-TRUE EMERGENCIES (needs 911):
-- Life-threatening: heart attack, stroke, unconscious, severe bleeding, choking, breathing problems
-- Fires, explosions, gas leaks
-- Active crimes: robbery, assault, home invasion, shots fired
-- Serious accidents with injuries
-- Anyone in immediate danger
+Caller said: "{SpeechResult}"
+Previous context: "{conversation_history}"
 
-NON-EMERGENCIES (can wait for police report):
-- Parking complaints, noise complaints
-- Past crimes to report (no ongoing danger)
-- Lost property
-- General questions
-- Vehicle registration issues
+Your job:
+1. Determine what critical information is still missing (location, nature of emergency, injuries, suspects, etc.)
+2. Generate ONE specific follow-up question to get that information
+3. Keep questions short, direct, and professional
 
-Return JSON: {{"is_emergency": true/false, "reason": "brief explanation", "incident_type": "Medical"|"Fire"|"Police"|"Traffic Accident"|"Non-Emergency"}}'''
-        
-        emergency_response_obj = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are an emergency triage AI. Determine if a situation is a TRUE EMERGENCY requiring 911."},
-                {"role": "user", "content": emergency_prompt}
-            ],
-            temperature=0.3
-        )
-        emergency_response = emergency_response_obj.choices[0].message.content
-        
-        try:
-            clean = emergency_response.strip().replace('```json', '').replace('```', '').strip()
-            emergency_check = json.loads(clean)
-        except:
-            emergency_check = {"is_emergency": False, "incident_type": "Non-Emergency", "reason": "Unable to determine"}
-        
-        # If TRUE EMERGENCY - Handle in TEST MODE but be direct
-        if emergency_check.get("is_emergency", False):
-            response = VoiceResponse()
-            incident = emergency_check.get("incident_type", "emergency")
-            
-            # TEST MODE - direct dispatcher response
-            emergency_msg = f"That's an emergency. Real situation, call 911. This is test only. Continuing for demo. What's your location?"
-            
-            # Update call as emergency (for testing)
-            await db.active_calls.update_one(
-                {"call_sid": CallSid},
-                {"$set": {
-                    "incident_type": f"{incident} (Test Emergency)",
-                    "description": SpeechResult,
-                    "status": "Processing",
-                    "priority": 1,
-                    "transcription": SpeechResult,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }}
-            )
-            
-            # Continue conversation
-            gather = Gather(
-                input='speech',
-                timeout=7,
-                speech_timeout='auto',
-                action='/api/webhooks/hold-caller',
-                method='POST',
-                language='en-US',
-                speech_model='phone_call'
-            )
-            
-            audio_url = generate_voice_audio_sync(emergency_msg)
-            if audio_url:
-                gather.play(audio_url)
-            
-            response.append(gather)
-            response.redirect('/api/webhooks/hold-caller', method='POST')
-            
-            return Response(content=str(response), media_type="application/xml")
-        
-        # NON-EMERGENCY - Continue with normal flow
-        # Extract details for non-emergency report
-        prompt = f'Extract from: "{SpeechResult}"\n\nReturn JSON: {{"incident_type": "Noise Complaint"|"Parking Violation"|"Lost Property"|"Past Crime Report"|"Vehicle Issue"|"Other", "location": "address or unknown", "description": "brief", "priority": 3-5}}'
+Return JSON:
+{{
+  "incident_type": "Medical"|"Fire"|"Police"|"Traffic"|"Other",
+  "location": "extracted address or 'unknown'",
+  "priority": 1-5,
+  "next_question": "your specific question",
+  "is_complete": true/false (true if you have enough info to dispatch)
+}}'''
         
         ai_response_obj = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Extract non-emergency report details. Return only JSON."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are an experienced 911 dispatcher. Ask relevant follow-up questions to gather critical information."},
+                {"role": "user", "content": ai_prompt}
             ],
-            temperature=0.3
+            temperature=0.4
         )
         ai_response = ai_response_obj.choices[0].message.content
         
@@ -473,37 +417,61 @@ Return JSON: {{"is_emergency": true/false, "reason": "brief explanation", "incid
             clean = ai_response.strip().replace('```json', '').replace('```', '').strip()
             details = json.loads(clean)
         except:
-            details = {"incident_type": "Other", "location": "Unknown", "description": SpeechResult, "priority": 4}
+            details = {
+                "incident_type": "Other",
+                "location": "unknown",
+                "priority": 3,
+                "next_question": "Can you give me more details about what's happening?",
+                "is_complete": False
+            }
         
-        # Update call with info but keep status as Processing (not Active yet)
+        # Update call with new information
+        updated_transcript = f"{conversation_history}\nCaller: {SpeechResult}" if conversation_history else f"Caller: {SpeechResult}"
+        
         await db.active_calls.update_one(
             {"call_sid": CallSid},
             {"$set": {
                 "incident_type": details.get("incident_type", "Other"),
-                "location": details.get("location", "Unknown"),
-                "description": details.get("description", SpeechResult),
-                "priority": details.get("priority", 4),
-                "transcription": SpeechResult,
-                "status": "Processing",  # Keep as Processing - will dispatch later
+                "location": details.get("location", "unknown"),
+                "description": SpeechResult,
+                "priority": details.get("priority", 3),
+                "transcription": updated_transcript,
+                "status": "Active" if details.get("is_complete") else "Processing",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }}
         )
         
-        # Ask LOCATION first if not provided
-        location = details.get("location", "Unknown")
-        if location == "Unknown" or "unknown" in location.lower() or location == "":
-            gather = Gather(input='speech', timeout=5, speech_timeout=2, speech_model='phone_call', action='/api/webhooks/get-location', method='POST', language='en-US')
-            audio_url = generate_voice_audio_sync("What's your location? Street address or nearest intersection?")
-            gather.play(audio_url)
-            response.append(gather)
-            response.redirect('/api/webhooks/followup-questions')
+        # If complete, dispatch and hold
+        if details.get("is_complete", False):
+            audio_url = generate_voice_audio_sync("Okay, I'm dispatching units to your location now. Stay on the line.")
+            response.play(audio_url)
+            response.redirect('/api/webhooks/hold-caller', method='POST')
         else:
-            # Have location, ask incident-specific questions
-            response.redirect('/api/webhooks/followup-questions')
+            # Ask the next question
+            gather = Gather(
+                input='speech',
+                timeout=5,
+                speech_timeout=3,
+                action='/api/webhooks/process-speech',
+                method='POST',
+                language='en-US',
+                speech_model='phone_call'
+            )
+            
+            next_question = details.get("next_question", "What else can you tell me?")
+            audio_url = generate_voice_audio_sync(next_question)
+            gather.play(audio_url)
+            
+            response.append(gather)
+            
+            # Fallback
+            fallback_url = generate_voice_audio_sync("Are you still there?")
+            response.play(fallback_url)
+            response.redirect('/api/webhooks/process-speech', method='POST')
         
     except Exception as e:
-        logger.error(f"Speech error: {e}")
-        audio_url = generate_voice_audio_sync("I have your information. Officers are being dispatched.")
+        logger.error(f"Speech processing error: {e}")
+        audio_url = generate_voice_audio_sync("I have your information. Help is on the way.")
         response.play(audio_url)
         response.redirect('/api/webhooks/hold-caller', method='POST')
     
