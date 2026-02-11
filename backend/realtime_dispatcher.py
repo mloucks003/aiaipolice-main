@@ -72,12 +72,7 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": {
-                        "type": "server_vad",  # Voice activity detection
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500
-                    },
+                    "turn_detection": None,  # Disable server VAD - we'll control manually
                     "temperature": 0.7,
                     "max_response_output_tokens": 150
                 }
