@@ -88,9 +88,9 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     },
                     "turn_detection": {
                         "type": "server_vad",
-                        "threshold": 0.5,
+                        "threshold": 0.6,  # Higher threshold = less sensitive to background noise
                         "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500
+                        "silence_duration_ms": 1200  # Longer silence before considering speech done
                     },
                     "temperature": 0.9,
                     "max_response_output_tokens": 150
