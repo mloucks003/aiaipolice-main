@@ -325,7 +325,7 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     To: str = Form(...)
 ):
-    """REALTIME API: Connect call to OpenAI Realtime API via WebSocket"""
+    """HYBRID: ElevenLabs realism + smart caching for speed (WORKING VERSION)"""
     # Create active call record
     active_call = ActiveCall(
         call_sid=CallSid,
@@ -336,14 +336,38 @@ async def handle_incoming_call(
     
     response = VoiceResponse()
     
-    # Connect to WebSocket for real-time audio streaming
-    # Get the backend URL and convert to WebSocket URL
-    backend_url = os.environ.get('BACKEND_URL', 'http://localhost:8000')
-    ws_url = backend_url.replace('https://', 'wss://').replace('http://', 'ws://')
+    # Use Gather with optimized settings
+    gather = Gather(
+        input='speech',
+        timeout=4,
+        speech_timeout=2,
+        action='/api/webhooks/process-speech',
+        method='POST',
+        language='en-US',
+        hints='police, fire, medical, emergency, accident, robbery, assault, shooting, heart attack, unconscious, help, bleeding',
+        profanity_filter=False,
+        speech_model='phone_call'
+    )
     
-    # Use Twilio's <Connect> and <Stream> to establish WebSocket
-    connect = response.connect()
-    connect.stream(url=f"{ws_url}/ws/media")
+    # Use CACHED ElevenLabs audio for instant playback
+    greeting = "911, what's your emergency?"
+    audio_url = generate_voice_audio_sync(greeting)
+    if audio_url:
+        gather.play(audio_url)
+    else:
+        gather.say(greeting, voice='Polly.Joanna')
+    
+    response.append(gather)
+    
+    # Fallback
+    fallback = "I'm sorry, I didn't catch that. What's happening?"
+    fallback_url = generate_voice_audio_sync(fallback)
+    if fallback_url:
+        response.play(fallback_url)
+    else:
+        response.say(fallback, voice='Polly.Joanna')
+    
+    response.redirect('/api/webhooks/voice', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
 
