@@ -324,8 +324,8 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     To: str = Form(...)
 ):
-    """Handle incoming emergency calls with ultra-realistic AI voice."""
-    # Create active call record in "Processing" status
+    """OPTIMIZED: Fast 911 response with Twilio TTS (no delay)."""
+    # Create active call record
     active_call = ActiveCall(
         call_sid=CallSid,
         caller_phone=From,
@@ -335,29 +335,26 @@ async def handle_incoming_call(
     
     response = VoiceResponse()
     
-    # Use Gather with OPTIMIZED settings for natural conversation
+    # Use Gather with optimized settings
     gather = Gather(
         input='speech',
-        timeout=4,  # 4 seconds to start speaking
-        speech_timeout=3,  # 3 seconds of silence to detect end (more natural)
+        timeout=4,
+        speech_timeout=2,  # Faster detection
         action='/api/webhooks/process-speech',
         method='POST',
         language='en-US',
-        hints='police, fire, medical, emergency, accident, robbery, assault, shooting, stabbing, heart attack, unconscious, help, scared, dying, bleeding, gun, knife, fire, smoke',
-        profanity_filter=False,  # Don't filter during emergencies
-        speech_model='phone_call'  # Optimized for phone calls
+        hints='police, fire, medical, emergency, accident, robbery, assault, shooting, heart attack, unconscious, help, bleeding',
+        profanity_filter=False,
+        speech_model='phone_call'
     )
     
-    # Natural dispatcher greeting - slower, more professional
-    greeting = "911, what's your emergency?"
-    audio_url = generate_voice_audio_sync(greeting)
-    gather.play(audio_url)
+    # Use Twilio TTS for INSTANT response (no ElevenLabs delay)
+    gather.say("911, what's your emergency?", voice='Polly.Joanna')
     
     response.append(gather)
     
-    # Fallback - more patient
-    fallback_url = generate_voice_audio_sync("I'm sorry, I didn't catch that. Can you tell me what's happening?")
-    response.play(fallback_url)
+    # Fallback
+    response.say("I'm sorry, I didn't catch that. What's happening?", voice='Polly.Joanna')
     response.redirect('/api/webhooks/voice', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
@@ -368,48 +365,54 @@ async def process_speech(
     SpeechResult: str = Form(None),
     Confidence: float = Form(None)
 ):
-    """Process speech and ask intelligent follow-up questions."""
+    """OPTIMIZED: Fast, efficient 911 dispatcher with smart AI."""
     response = VoiceResponse()
     
     if not SpeechResult:
-        audio_url = generate_voice_audio_sync("I didn't catch that. Can you tell me what's happening?")
-        response.play(audio_url)
+        # Use Twilio TTS for instant response (no delay)
+        response.say("I didn't catch that. What's your emergency?", voice='Polly.Joanna')
         response.redirect('/api/webhooks/voice', method='POST')
         return Response(content=str(response), media_type="application/xml")
     
     try:
         # Get current call data
         call = await db.active_calls.find_one({"call_sid": CallSid}, {"_id": 0})
-        
-        # Use AI to determine what to ask next
         conversation_history = call.get('transcription', '') if call else ''
+        question_count = conversation_history.count('\n') if conversation_history else 0
         
-        ai_prompt = f'''You are a 911 dispatcher. Based on this conversation:
+        # SMART AI PROMPT - Efficient dispatcher behavior
+        ai_prompt = f'''You are a professional 911 dispatcher. Analyze this call efficiently:
 
-Caller said: "{SpeechResult}"
-Previous context: "{conversation_history}"
+CALLER: "{SpeechResult}"
+PREVIOUS: "{conversation_history}"
+QUESTIONS ASKED: {question_count}
 
-Your job:
-1. Determine what critical information is still missing (location, nature of emergency, injuries, suspects, etc.)
-2. Generate ONE specific follow-up question to get that information
-3. Keep questions short, direct, and professional
+CRITICAL RULES:
+1. After 2-3 questions, you MUST dispatch (set is_complete=true)
+2. Only ask about MISSING critical info: location, incident type, immediate danger
+3. Be reassuring: "Okay", "I understand", "Help is on the way"
+4. Keep responses under 15 words
+5. NEVER ask more than 3 questions total
 
 Return JSON:
 {{
   "incident_type": "Medical"|"Fire"|"Police"|"Traffic"|"Other",
   "location": "extracted address or 'unknown'",
   "priority": 1-5,
-  "next_question": "your specific question",
-  "is_complete": true/false (true if you have enough info to dispatch)
+  "has_location": true/false,
+  "has_incident_type": true/false,
+  "dispatcher_response": "short reassuring response + question if needed",
+  "is_complete": true/false (TRUE after 2-3 exchanges OR if you have location + incident type)
 }}'''
         
         ai_response_obj = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an experienced 911 dispatcher. Ask relevant follow-up questions to gather critical information."},
+                {"role": "system", "content": "You are an efficient 911 dispatcher. Gather info quickly, reassure caller, dispatch fast."},
                 {"role": "user", "content": ai_prompt}
             ],
-            temperature=0.4
+            temperature=0.3,
+            max_tokens=200  # Faster response
         )
         ai_response = ai_response_obj.choices[0].message.content
         
@@ -417,15 +420,20 @@ Return JSON:
             clean = ai_response.strip().replace('```json', '').replace('```', '').strip()
             details = json.loads(clean)
         except:
+            # Fallback - dispatch after 3 questions
             details = {
                 "incident_type": "Other",
                 "location": "unknown",
                 "priority": 3,
-                "next_question": "Can you give me more details about what's happening?",
-                "is_complete": False
+                "dispatcher_response": "Okay, I'm sending help now. Stay on the line.",
+                "is_complete": question_count >= 2
             }
         
-        # Update call with new information
+        # Force completion after 3 questions
+        if question_count >= 2:
+            details["is_complete"] = True
+        
+        # Update call
         updated_transcript = f"{conversation_history}\nCaller: {SpeechResult}" if conversation_history else f"Caller: {SpeechResult}"
         
         await db.active_calls.update_one(
@@ -433,7 +441,7 @@ Return JSON:
             {"$set": {
                 "incident_type": details.get("incident_type", "Other"),
                 "location": details.get("location", "unknown"),
-                "description": SpeechResult,
+                "description": updated_transcript,
                 "priority": details.get("priority", 3),
                 "transcription": updated_transcript,
                 "status": "Active" if details.get("is_complete") else "Processing",
@@ -441,38 +449,33 @@ Return JSON:
             }}
         )
         
-        # If complete, dispatch and hold
+        # DISPATCH or CONTINUE
         if details.get("is_complete", False):
-            audio_url = generate_voice_audio_sync("Okay, I'm dispatching units to your location now. Stay on the line.")
-            response.play(audio_url)
+            # Use Twilio TTS for instant response
+            response.say("Okay, help is on the way. Stay on the line.", voice='Polly.Joanna')
             response.redirect('/api/webhooks/hold-caller', method='POST')
         else:
-            # Ask the next question
+            # Continue with next question - Use Twilio TTS for speed
             gather = Gather(
                 input='speech',
-                timeout=5,
-                speech_timeout=3,
+                timeout=4,
+                speech_timeout=2,
                 action='/api/webhooks/process-speech',
                 method='POST',
                 language='en-US',
                 speech_model='phone_call'
             )
             
-            next_question = details.get("next_question", "What else can you tell me?")
-            audio_url = generate_voice_audio_sync(next_question)
-            gather.play(audio_url)
+            dispatcher_response = details.get("dispatcher_response", "What's your location?")
+            gather.say(dispatcher_response, voice='Polly.Joanna')
             
             response.append(gather)
-            
-            # Fallback
-            fallback_url = generate_voice_audio_sync("Are you still there?")
-            response.play(fallback_url)
+            response.say("Are you there?", voice='Polly.Joanna')
             response.redirect('/api/webhooks/process-speech', method='POST')
         
     except Exception as e:
         logger.error(f"Speech processing error: {e}")
-        audio_url = generate_voice_audio_sync("I have your information. Help is on the way.")
-        response.play(audio_url)
+        response.say("I have your information. Help is on the way.", voice='Polly.Joanna')
         response.redirect('/api/webhooks/hold-caller', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
