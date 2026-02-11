@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Form, Request, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Form, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -20,6 +20,7 @@ import json
 from fine_codes import get_fine_amount
 from elevenlabs_helper import generate_voice_audio_sync
 import hashlib
+from realtime_dispatcher import RealtimeDispatcher
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -324,7 +325,7 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     To: str = Form(...)
 ):
-    """OPTIMIZED: Ultra-realistic ElevenLabs voice with smart caching."""
+    """REALTIME API: Connect call to OpenAI Realtime API via WebSocket"""
     # Create active call record
     active_call = ActiveCall(
         call_sid=CallSid,
@@ -335,38 +336,14 @@ async def handle_incoming_call(
     
     response = VoiceResponse()
     
-    # Use Gather with optimized settings
-    gather = Gather(
-        input='speech',
-        timeout=4,
-        speech_timeout=2,
-        action='/api/webhooks/process-speech',
-        method='POST',
-        language='en-US',
-        hints='police, fire, medical, emergency, accident, robbery, assault, shooting, heart attack, unconscious, help, bleeding',
-        profanity_filter=False,
-        speech_model='phone_call'
-    )
+    # Connect to WebSocket for real-time audio streaming
+    # Get the backend URL and convert to WebSocket URL
+    backend_url = os.environ.get('BACKEND_URL', 'http://localhost:8000')
+    ws_url = backend_url.replace('https://', 'wss://').replace('http://', 'ws://')
     
-    # Use CACHED ElevenLabs audio for instant playback
-    greeting = "911, what's your emergency?"
-    audio_url = generate_voice_audio_sync(greeting)
-    if audio_url:
-        gather.play(audio_url)
-    else:
-        gather.say(greeting, voice='Polly.Joanna')
-    
-    response.append(gather)
-    
-    # Fallback
-    fallback = "I'm sorry, I didn't catch that. What's happening?"
-    fallback_url = generate_voice_audio_sync(fallback)
-    if fallback_url:
-        response.play(fallback_url)
-    else:
-        response.say(fallback, voice='Polly.Joanna')
-    
-    response.redirect('/api/webhooks/voice', method='POST')
+    # Use Twilio's <Connect> and <Stream> to establish WebSocket
+    connect = response.connect()
+    connect.stream(url=f"{ws_url}/ws/media")
     
     return Response(content=str(response), media_type="application/xml")
 
@@ -1253,6 +1230,39 @@ async def test_dispatch():
 
 # Include router with all routes
 app.include_router(api_router)
+
+# WebSocket endpoint for OpenAI Realtime API
+@app.websocket("/ws/media")
+async def websocket_media_stream(websocket: WebSocket):
+    """WebSocket endpoint for Twilio Media Streams + OpenAI Realtime API"""
+    await websocket.accept()
+    
+    call_sid = None
+    dispatcher = None
+    
+    try:
+        # Get initial message with call info
+        initial_message = await websocket.receive_text()
+        data = json.loads(initial_message)
+        
+        if data['event'] == 'start':
+            call_sid = data['start']['callSid']
+            logger.info(f"WebSocket connection established for call {call_sid}")
+            
+            # Create realtime dispatcher
+            dispatcher = RealtimeDispatcher(call_sid, db)
+            
+            # Run the bidirectional audio streaming
+            await dispatcher.run(websocket)
+            
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for call {call_sid}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        if dispatcher and dispatcher.openai_ws:
+            await dispatcher.openai_ws.close()
+
 
 app.add_middleware(
     CORSMiddleware,
