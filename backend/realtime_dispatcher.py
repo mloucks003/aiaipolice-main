@@ -48,27 +48,26 @@ class RealtimeDispatcher:
             
             logger.info(f"WebSocket connected for call {self.call_sid}")
             
-            # Configure the session with server VAD enabled
+            # Configure the session - USE CORRECT FORMAT from Twilio example
             session_config = {
                 "type": "session.update",
                 "session": {
-                    "modalities": ["audio", "text"],  # Try audio first
+                    "modalities": ["text", "audio"],
                     "instructions": """You are a professional 911 emergency dispatcher. Your role:
 
-1. IMMEDIATELY greet the caller with: "911, what's your emergency?"
-2. Stay calm and professional at all times
-3. Gather critical information efficiently:
+1. Stay calm and professional at all times
+2. Gather critical information efficiently:
    - Location (address, cross streets, landmarks)
    - Nature of emergency (medical, fire, police, traffic)
    - Immediate dangers or injuries
-4. Ask 2-3 focused questions maximum
-5. Provide reassurance: "Okay", "I understand", "Help is on the way"
-6. Speak naturally like a real human dispatcher
-7. After gathering location + incident type, say "Help is on the way"
+3. Ask 2-3 focused questions maximum
+4. Provide reassurance: "Okay", "I understand", "Help is on the way"
+5. Speak naturally like a real human dispatcher
+6. After gathering location + incident type, say "Help is on the way"
 
 Keep responses under 20 words. Be conversational and empathetic.""",
-                    "voice": "alloy",  # Professional female voice
-                    "input_audio_format": "g711_ulaw",  # Twilio format
+                    "voice": "alloy",
+                    "input_audio_format": "g711_ulaw",
                     "output_audio_format": "g711_ulaw",
                     "input_audio_transcription": {
                         "model": "whisper-1"
@@ -80,7 +79,7 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                         "silence_duration_ms": 500
                     },
                     "temperature": 0.8,
-                    "max_response_output_tokens": 4096  # Increase token limit
+                    "max_response_output_tokens": 4096
                 }
             }
             
@@ -92,32 +91,28 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             raise
     
     async def trigger_initial_greeting(self):
-        """Trigger initial greeting by injecting an assistant message"""
+        """Send initial conversation item to make AI speak first - EXACTLY like Twilio example"""
         try:
-            # Instead of asking AI to generate, directly inject the greeting as an assistant message
-            # This will be played back to the caller
-            greeting_item = {
+            # Send conversation item with greeting prompt
+            initial_conversation_item = {
                 "type": "conversation.item.create",
                 "item": {
                     "type": "message",
-                    "role": "assistant",
+                    "role": "user",
                     "content": [
                         {
-                            "type": "text",
-                            "text": "911, what's your emergency?"
+                            "type": "input_text",
+                            "text": "Greet the caller with '911, what's your emergency?'"
                         }
                     ]
                 }
             }
-            await self.openai_ws.send(json.dumps(greeting_item))
-            logger.info(f"Injected greeting message for call {self.call_sid}")
+            await self.openai_ws.send(json.dumps(initial_conversation_item))
+            logger.info(f"Sent initial conversation item for call {self.call_sid}")
             
-            # Now trigger response generation to convert text to audio
-            response_create = {
-                "type": "response.create"
-            }
-            await self.openai_ws.send(json.dumps(response_create))
-            logger.info(f"Triggered audio generation for greeting on call {self.call_sid}")
+            # Immediately trigger response creation
+            await self.openai_ws.send(json.dumps({"type": "response.create"}))
+            logger.info(f"Triggered response.create for call {self.call_sid}")
         except Exception as e:
             logger.error(f"Failed to trigger initial greeting for call {self.call_sid}: {e}")
         
@@ -167,10 +162,8 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Session is ready - DON'T trigger anything
-                    # Let the AI respond naturally when caller speaks
-                    # The instructions already tell it to greet first
-                    logger.info(f"Session ready for call {self.call_sid}, waiting for caller audio")
+                    # Session is ready - trigger initial greeting EXACTLY like Twilio example
+                    await self.trigger_initial_greeting()
                 
                 elif event_type == 'response.created':
                     logger.info(f"Call {self.call_sid} - Response created: {json.dumps(data)[:500]}")
