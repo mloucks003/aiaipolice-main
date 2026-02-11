@@ -90,6 +90,34 @@ Keep responses under 20 words. Be conversational and empathetic.""",
             logger.error(f"Failed to connect to OpenAI for call {self.call_sid}: {e}")
             raise
     
+    async def trigger_initial_greeting(self):
+        """Trigger initial greeting by adding a conversation item"""
+        try:
+            # Add a system message to trigger the greeting
+            conversation_item = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "[Call connected]"
+                        }
+                    ]
+                }
+            }
+            await self.openai_ws.send(json.dumps(conversation_item))
+            
+            # Now trigger a response
+            response_create = {
+                "type": "response.create"
+            }
+            await self.openai_ws.send(json.dumps(response_create))
+            logger.info(f"Initial greeting triggered for call {self.call_sid}")
+        except Exception as e:
+            logger.error(f"Failed to trigger initial greeting for call {self.call_sid}: {e}")
+    
     async def send_initial_greeting(self):
         """Send initial greeting after session is ready"""
         try:
@@ -148,7 +176,8 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Session is ready - VAD will handle responses automatically
+                    # Session is ready - add a conversation item to trigger greeting
+                    await self.trigger_initial_greeting()
                 
                 elif event_type == 'response.audio.delta':
                     # Stream audio back to Twilio
