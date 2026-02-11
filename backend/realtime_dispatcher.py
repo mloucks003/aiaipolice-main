@@ -162,8 +162,9 @@ Keep responses under 20 words. Be conversational and empathetic.""",
                     
                 elif event_type == 'session.updated':
                     logger.info(f"OpenAI session updated for call {self.call_sid}")
-                    # Session is ready - trigger initial greeting EXACTLY like Twilio example
-                    await self.trigger_initial_greeting()
+                    # DON'T trigger initial greeting - let caller speak first
+                    # Then AI will respond naturally
+                    logger.info(f"Session ready, waiting for caller to speak first on call {self.call_sid}")
                 
                 elif event_type == 'response.created':
                     logger.info(f"Call {self.call_sid} - Response created: {json.dumps(data)[:500]}")
