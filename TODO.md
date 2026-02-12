@@ -120,15 +120,16 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Noise-Resistant Settings (v61)**
-- VAD ENABLED (required for transcription)
-- threshold: 0.75 (higher - filters background noise in loud/emergency environments)
-- silence_duration_ms: 2000 (2 seconds - balance between responsiveness and user time)
-- prefix_padding_ms: 400 (extra padding to ensure speech start is captured)
+**Current Approach: Delayed VAD Activation (v62)**
+- VAD DISABLED during initial greeting (prevents background noise from interrupting AI's opening)
+- VAD ENABLED after greeting completes with these settings:
+  - threshold: 0.75 (higher - filters background noise in loud/emergency environments)
+  - silence_duration_ms: 2000 (2 seconds - balance between responsiveness and user time)
+  - prefix_padding_ms: 400 (extra padding to ensure speech start is captured)
 - max_response_output_tokens: 300 (allows longer AI responses)
-- Goal: Work reliably in quiet AND loud emergency environments
+- Goal: Protect initial greeting from interruption, then enable natural conversation
 
-**Key Finding:** v60 works great in quiet environments. v61 increases threshold for noisy emergency scenarios (sirens, traffic, chaos).
+**Key Innovation:** VAD is disabled during the AI's first response (greeting), then dynamically enabled once the greeting completes. This prevents background noise from cutting off the critical opening message.
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
