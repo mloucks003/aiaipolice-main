@@ -338,15 +338,6 @@ async def handle_incoming_call(
     
     response = VoiceResponse()
     
-    # Start recording the call
-    response.record(
-        recording_status_callback=f"https://{request.headers.get('host', 'law-enforcement-rms-b2749bfd89b0.herokuapp.com')}/api/webhooks/recording-status",
-        recording_status_callback_method='POST',
-        recording_status_callback_event=['completed'],
-        max_length=3600,  # 1 hour max
-        transcribe=False  # We already have transcription from OpenAI
-    )
-    
     # Try to use OpenAI Realtime API if available
     if OPENAI_API_KEY:
         try:
@@ -357,6 +348,19 @@ async def handle_incoming_call(
             ws_url = f"wss://{host}/ws/media"
             
             logger.info(f"Initiating Realtime API for call {CallSid} with WebSocket URL: {ws_url}")
+            
+            # Start recording using Twilio's recording API (not TwiML Record verb)
+            # This will record the call in the background
+            if twilio_client:
+                try:
+                    # Start recording via Twilio API
+                    twilio_client.calls(CallSid).recordings.create(
+                        recording_status_callback=f"https://{host}/api/webhooks/recording-status",
+                        recording_status_callback_method='POST'
+                    )
+                    logger.info(f"Started recording for call {CallSid}")
+                except Exception as rec_error:
+                    logger.error(f"Failed to start recording for call {CallSid}: {rec_error}")
             
             # Return TwiML with Connect and Stream for Realtime API
             connect = Connect()
