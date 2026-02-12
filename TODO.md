@@ -132,9 +132,9 @@ MongoDB is configured but needs full integration with all features.
 
 **Current VAD Settings:**
 ```python
-threshold: 0.9  # Maximum - least sensitive to noise
-silence_duration_ms: 2500  # 2.5 seconds
-prefix_padding_ms: 800  # Extra padding for speech start
+threshold: 0.5  # Balanced - detects speech but ignores background noise
+silence_duration_ms: 1200  # 1.2 seconds
+prefix_padding_ms: 300  # Standard padding
 ```
 
 **Iteration History:**
@@ -143,7 +143,8 @@ prefix_padding_ms: 800  # Extra padding for speech start
 - v47: threshold 0.8, silence 1000ms - still cutting off
 - v48: threshold 0.8, silence 1500ms - still cutting off
 - v49: threshold 0.85, silence 2000ms, prefix 600ms - still cutting off at beginning
-- v50: threshold 0.9, silence 2500ms, prefix 800ms - CURRENT (testing needed)
+- v50: threshold 0.9, silence 2500ms, prefix 800ms - AI responses get cut off by background noise
+- v51: threshold 0.5, silence 1200ms, prefix 300ms - CURRENT (balanced approach)
 
 ---
 
