@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Form, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1378,9 +1379,6 @@ async def recordings_viewer():
     """Serve recordings viewer page."""
     return FileResponse(ROOT_DIR / "recordings_viewer.html")
 
-# Include router with all routes
-app.include_router(api_router)
-
 # WebSocket endpoint for OpenAI Realtime API
 @app.websocket("/ws/media")
 async def websocket_media_stream(websocket: WebSocket):
@@ -1440,6 +1438,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount API router
+app.include_router(api_router)
+
+# Serve React frontend static files
+FRONTEND_BUILD_DIR = Path(__file__).parent.parent / "frontend" / "build"
+if FRONTEND_BUILD_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_BUILD_DIR / "static")), name="static")
+    
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """Serve React app for all non-API routes"""
+        # Don't serve React for API routes
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        # Try to serve the requested file
+        file_path = FRONTEND_BUILD_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        
+        # Otherwise serve index.html (for React Router)
+        return FileResponse(FRONTEND_BUILD_DIR / "index.html")
 
 logging.basicConfig(
     level=logging.INFO,
