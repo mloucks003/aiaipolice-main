@@ -96,7 +96,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                         "create_response": True  # Auto-create responses after silence
                     },
                     "temperature": 0.9,
-                    "max_response_output_tokens": 150
+                    "max_response_output_tokens": 300  # Increased to allow longer responses without cutoff
                 }
             }
             

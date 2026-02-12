@@ -120,12 +120,15 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Moderate Threshold + Moderate Silence (v59)**
+**Current Approach: Moderate Threshold + Increased Token Limit (v60)**
 - VAD ENABLED (required for transcription)
 - threshold: 0.6 (moderate - detects speech reliably without being too sensitive)
 - silence_duration_ms: 2000 (2 seconds - balance between responsiveness and user time)
 - prefix_padding_ms: 300 (standard)
-- Goal: Reliable speech detection with reasonable response time
+- max_response_output_tokens: 300 (increased from 150 to allow longer AI responses)
+- Goal: Reliable speech detection + allow AI to complete full responses
+
+**Key Finding:** Response time is good, but AI gets cut off during long responses even in quiet environments. This indicates the issue is token limit, not VAD settings.
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
