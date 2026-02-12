@@ -273,7 +273,7 @@ const LandingPage = () => {
                       <p>Waiting for incoming calls...</p>
                     </div>
                   ) : (
-                    activeCalls.map((call, index) => (
+                    activeCalls.filter(call => call && call.type).map((call, index) => (
                       <div
                         key={call.id}
                         className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 animate-slideIn"
