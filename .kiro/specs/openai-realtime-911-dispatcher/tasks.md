@@ -229,6 +229,14 @@ This implementation plan breaks down the OpenAI Realtime API integration into di
 - [ ] 16. Final checkpoint - Deployment readiness
   - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 17. Tune VAD settings to prevent caller cutoff
+  - Update VAD threshold to 0.9 for maximum noise tolerance
+  - Update silence_duration_ms to 2500ms to allow 2.5 seconds for caller to speak
+  - Update prefix_padding_ms to 800ms to capture full speech start
+  - Test with real phone calls to verify settings prevent cutoff
+  - Document final working settings in TODO.md
+  - _Requirements: 4.2, 4.3, 4.4, 4.7_
+
 ## Notes
 
 - All tasks are required for comprehensive implementation with full test coverage

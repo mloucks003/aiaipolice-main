@@ -201,9 +201,9 @@ class RealtimeDispatcher:
         },
         "turn_detection": {
             "type": "server_vad",
-            "threshold": 0.5,
-            "prefix_padding_ms": 300,
-            "silence_duration_ms": 500
+            "threshold": 0.9,  # Very high - maximum noise tolerance
+            "prefix_padding_ms": 800,  # Extra padding to capture full speech start
+            "silence_duration_ms": 2500  # 2.5 seconds - prioritize not cutting off caller
         },
         "temperature": 0.7,
         "max_response_output_tokens": 150

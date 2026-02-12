@@ -61,16 +61,17 @@ This specification defines the requirements for implementing OpenAI's Realtime A
 
 ### Requirement 4: Voice Activity Detection and Turn-Taking
 
-**User Story:** As a caller, I want to be able to interrupt the AI dispatcher mid-sentence, so that I can provide urgent information immediately.
+**User Story:** As a caller, I want to be able to speak without being cut off by the AI, while still maintaining reasonably fast response times.
 
 #### Acceptance Criteria
 
 1. THE Session_Config SHALL enable server_vad (server-side Voice Activity Detection)
-2. THE VAD configuration SHALL set threshold to 0.5 for balanced sensitivity
-3. THE VAD configuration SHALL set prefix_padding_ms to 300 to capture speech start
-4. THE VAD configuration SHALL set silence_duration_ms to 500 for natural turn-taking
+2. THE VAD configuration SHALL set threshold to 0.9 for maximum noise tolerance to prevent false speech detection
+3. THE VAD configuration SHALL set prefix_padding_ms to 800 to capture full speech start including initial sounds
+4. THE VAD configuration SHALL set silence_duration_ms to 2500 to allow caller 2.5 seconds to speak without interruption
 5. WHEN the caller starts speaking, THE Dispatcher_System SHALL allow interruption of AI speech
-6. WHEN VAD detects silence, THE Dispatcher_System SHALL trigger AI response generation
+6. WHEN VAD detects silence for the configured duration, THE Dispatcher_System SHALL trigger AI response generation
+7. THE VAD settings SHALL prioritize not cutting off the caller over response speed
 
 ### Requirement 5: Transcription and Call Logging
 

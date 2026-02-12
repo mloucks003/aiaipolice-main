@@ -132,9 +132,18 @@ MongoDB is configured but needs full integration with all features.
 
 **Current VAD Settings:**
 ```python
-threshold: 0.9  # Very high - less sensitive to noise
-silence_duration_ms: 3000  # 3 seconds of silence
+threshold: 0.9  # Maximum - least sensitive to noise
+silence_duration_ms: 2500  # 2.5 seconds
+prefix_padding_ms: 800  # Extra padding for speech start
 ```
+
+**Iteration History:**
+- v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
+- v46: threshold 0.7, silence 800ms - too fast, cutting off user
+- v47: threshold 0.8, silence 1000ms - still cutting off
+- v48: threshold 0.8, silence 1500ms - still cutting off
+- v49: threshold 0.85, silence 2000ms, prefix 600ms - still cutting off at beginning
+- v50: threshold 0.9, silence 2500ms, prefix 800ms - CURRENT (testing needed)
 
 ---
 
