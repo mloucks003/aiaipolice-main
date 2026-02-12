@@ -741,12 +741,24 @@ Keep responses under 160 characters when possible (SMS length)."""
         
         # Send SMS response via Twilio
         if twilio_client:
-            message = twilio_client.messages.create(
-                body=response_text,
-                from_=TWILIO_PHONE_NUMBER,
-                to=From
-            )
-            logger.info(f"Sent SMS response to {From}: {response_text}")
+            try:
+                logger.info(f"Attempting to send SMS to {From} from {TWILIO_PHONE_NUMBER}")
+                logger.info(f"Message body: {response_text}")
+                message = twilio_client.messages.create(
+                    body=response_text,
+                    from_=TWILIO_PHONE_NUMBER,
+                    to=From
+                )
+                logger.info(f"Sent SMS response to {From}: {response_text} (SID: {message.sid})")
+            except Exception as sms_error:
+                logger.error(f"Failed to send SMS to {From}: {sms_error}")
+                logger.error(f"Twilio credentials check - SID: {TWILIO_ACCOUNT_SID[:10]}..., Phone: {TWILIO_PHONE_NUMBER}")
+                import traceback
+                logger.error(traceback.format_exc())
+        else:
+            logger.error("Twilio client not initialized - cannot send SMS")
+            logger.error(f"TWILIO_ACCOUNT_SID present: {bool(TWILIO_ACCOUNT_SID)}")
+            logger.error(f"TWILIO_AUTH_TOKEN present: {bool(TWILIO_AUTH_TOKEN)}")
         
         return Response(content="<?xml version='1.0' encoding='UTF-8'?><Response></Response>", media_type="application/xml")
         
