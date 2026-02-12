@@ -88,15 +88,22 @@ export default function LoginPage({ onLogin }) {
             </div>
           </form>
 
-          <div style={{ marginTop: '20px', padding: '10px', background: '#ffffff', border: '2px solid #808080', borderStyle: 'inset' }}>
-            <p style={{ fontSize: '10px', color: '#000', lineHeight: '1.4' }}>
-              <strong>WARNING:</strong> This is a restricted law enforcement system. Unauthorized access is prohibited and may result in criminal prosecution.
+          <div style={{ marginTop: '20px', padding: '10px', background: '#e6f3ff', border: '2px solid #0066cc', borderRadius: '4px' }}>
+            <p style={{ fontSize: '11px', color: '#003366', lineHeight: '1.5', fontWeight: 'bold', textAlign: 'center' }}>
+              ⚠️ TEST SYSTEM ONLY ⚠️
+            </p>
+            <p style={{ fontSize: '10px', color: '#003366', lineHeight: '1.4', marginTop: '6px', textAlign: 'center' }}>
+              This is a demonstration system built by Patriot CAD Systems.
+              <br />
+              <strong>NOT an actual law enforcement system.</strong>
+              <br />
+              Contact Michael Loucks for login credentials.
             </p>
           </div>
 
           <div style={{ marginTop: '12px', padding: '8px', background: '#ffffe0', border: '1px solid #808080' }}>
             <p style={{ fontSize: '10px', color: '#000' }}>
-              <strong>System Info:</strong> Contact administrator for access credentials.
+              <strong>System Info:</strong> For demo access, contact the system administrator.
             </p>
           </div>
         </div>
