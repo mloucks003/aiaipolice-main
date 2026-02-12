@@ -120,13 +120,15 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Higher Threshold for Noise Filtering (v65)**
+**Current Approach: Personal Connection with Name Usage (v66)**
 - threshold: 0.7 (higher threshold filters background noise like a real person would)
 - silence_duration_ms: 2000 (2 seconds)
 - prefix_padding_ms: 300 (standard)
 - max_response_output_tokens: 300
-- Removed create_response flag (was causing intro to repeat)
-- Goal: Simple, clean VAD that filters noise naturally
+- NEW: AI asks for location FIRST: "911, where is the location of your emergency?"
+- NEW: AI asks for caller's NAME early in conversation
+- NEW: AI uses caller's name throughout the call to build rapport and trust
+- Goal: Personal, empathetic dispatcher that makes callers feel heard and cared for
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
@@ -150,6 +152,7 @@ MongoDB is configured but needs full integration with all features.
 - v63: threshold 0.8, silence 2000ms - too high, not detecting user speech
 - v64: threshold 0.65, silence 2000ms - still issues with background noise
 - v65: threshold 0.7, silence 2000ms, removed create_response flag - CURRENT (clean, simple approach)
+- v66: Added personal touch - AI asks for location first, then name, uses caller's name throughout call - DEPLOYED (Heroku v68)
 
 ---
 
