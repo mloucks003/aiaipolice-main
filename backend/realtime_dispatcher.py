@@ -90,9 +90,9 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     },
                     "turn_detection": {
                         "type": "server_vad",
-                        "threshold": 0.9,  # Maximum threshold - very insensitive to background noise
-                        "prefix_padding_ms": 500,  # More padding to capture speech start
-                        "silence_duration_ms": 3000  # 3 full seconds of silence before considering speech done
+                        "threshold": 0.7,  # Balanced threshold
+                        "prefix_padding_ms": 300,  # Standard padding
+                        "silence_duration_ms": 800  # 800ms for faster responses
                     },
                     "temperature": 0.9,
                     "max_response_output_tokens": 150

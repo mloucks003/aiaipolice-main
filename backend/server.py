@@ -219,6 +219,22 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication")
 
+async def start_recording_async(call_sid: str, host: str):
+    """Start recording after a short delay to ensure call is connected"""
+    try:
+        # Wait for call to be fully connected
+        await asyncio.sleep(2)
+        
+        if twilio_client:
+            # Start recording via Twilio API
+            recording = twilio_client.calls(call_sid).recordings.create(
+                recording_status_callback=f"https://{host}/api/webhooks/recording-status",
+                recording_status_callback_method='POST'
+            )
+            logger.info(f"Started recording {recording.sid} for call {call_sid}")
+    except Exception as e:
+        logger.error(f"Failed to start recording for call {call_sid}: {e}")
+
 async def find_or_create_person(citation_data: dict) -> str:
     """Find existing person or create new one from citation data."""
     # Try to find by driver's license first
@@ -349,26 +365,20 @@ async def handle_incoming_call(
             
             logger.info(f"Initiating Realtime API for call {CallSid} with WebSocket URL: {ws_url}")
             
-            # Start recording using Twilio's recording API (not TwiML Record verb)
-            # This will record the call in the background
-            if twilio_client:
-                try:
-                    # Start recording via Twilio API
-                    twilio_client.calls(CallSid).recordings.create(
-                        recording_status_callback=f"https://{host}/api/webhooks/recording-status",
-                        recording_status_callback_method='POST'
-                    )
-                    logger.info(f"Started recording for call {CallSid}")
-                except Exception as rec_error:
-                    logger.error(f"Failed to start recording for call {CallSid}: {rec_error}")
-            
             # Return TwiML with Connect and Stream for Realtime API
+            # Note: Recording will be handled via Twilio's call recording feature
+            # We'll use the statusCallback to capture when recording is available
             connect = Connect()
             stream = Stream(url=ws_url)
             connect.append(stream)
             response.append(connect)
             
             logger.info(f"Returning TwiML with Media Streams for call {CallSid}")
+            
+            # Start recording asynchronously after returning TwiML
+            # This needs to happen after the call is connected
+            asyncio.create_task(start_recording_async(CallSid, host))
+            
             return Response(content=str(response), media_type="application/xml")
             
         except Exception as e:
