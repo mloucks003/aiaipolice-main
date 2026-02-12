@@ -611,6 +611,163 @@ async def recording_status_callback(
         logger.error(f"Error updating recording for call {CallSid}: {e}")
         return {"status": "error", "message": str(e)}
 
+@api_router.post("/webhooks/sms")
+async def handle_incoming_sms(
+    From: str = Form(...),
+    Body: str = Form(...),
+    MessageSid: str = Form(...)
+):
+    """Handle incoming SMS messages - AI-powered text dispatcher"""
+    try:
+        logger.info(f"Incoming SMS from {From}: {Body}")
+        
+        # Find or create SMS conversation
+        conversation = await db.active_calls.find_one(
+            {"caller_phone": From, "type": "sms", "status": {"$ne": "Closed"}},
+            {"_id": 0}
+        )
+        
+        if not conversation:
+            # Create new SMS conversation
+            conversation = {
+                "id": str(uuid.uuid4()),
+                "call_sid": MessageSid,
+                "caller_phone": From,
+                "type": "sms",
+                "incident_type": None,
+                "location": None,
+                "description": None,
+                "priority": 3,
+                "status": "Processing",
+                "conversation_history": [],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.active_calls.insert_one(conversation)
+            logger.info(f"Created new SMS conversation for {From}")
+        
+        # Add user message to history
+        conversation["conversation_history"].append(f"Caller: {Body}")
+        
+        # Build AI prompt
+        history_text = "\n".join(conversation["conversation_history"][-10:])  # Last 10 messages
+        message_count = len(conversation["conversation_history"])
+        
+        system_prompt = """You are a professional 911 emergency dispatcher handling text messages. Your role:
+
+IMPORTANT: You are an AI test system built by Patriot CAD Systems for demonstration purposes only.
+
+CONVERSATION FLOW:
+1. ALWAYS greet first: "This is an AI test system built by Patriot CAD Systems. 911 - what is the location of your emergency?"
+2. After getting location, ask: "What's your name?"
+3. Gather information through natural conversation (4-6 exchanges):
+   - Exact location (address, cross streets, landmarks) - ASK THIS FIRST
+   - Caller's name - ASK THIS SECOND
+   - Nature of emergency (medical, fire, police, traffic)
+   - Current situation and immediate dangers
+   - Injuries or people involved
+4. Keep responses SHORT (1-2 sentences max for text)
+5. After 4-6 exchanges OR when you have location + incident type, dispatch help
+
+TONE:
+- Professional and calm
+- Concise (this is text, not voice)
+- Reassuring: "Help is on the way", "Stay safe"
+- Use their name once or twice
+
+Keep responses under 160 characters when possible (SMS length)."""
+
+        # Call OpenAI
+        ai_response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Conversation so far:\n{history_text}\n\nRespond to the caller's latest message. Message count: {message_count}"}
+            ],
+            temperature=0.7,
+            max_tokens=100
+        )
+        
+        response_text = ai_response.choices[0].message.content.strip()
+        
+        # Add AI response to history
+        conversation["conversation_history"].append(f"Dispatcher: {response_text}")
+        
+        # Extract incident info
+        body_lower = Body.lower()
+        
+        # Detect location
+        location_keywords = ['street', 'avenue', 'road', 'address', 'at ', 'on ', 'near', 'boulevard', 'drive', 'lane', 'st', 'ave', 'rd', 'blvd']
+        if any(word in body_lower for word in location_keywords) and not conversation.get("location"):
+            conversation["location"] = Body
+            logger.info(f"SMS - Location detected: {Body}")
+        
+        # Detect incident type
+        incident_keywords = {
+            'fire': 'Fire', 'medical': 'Medical', 'police': 'Police',
+            'accident': 'Traffic', 'emergency': 'Other', 'robbery': 'Police',
+            'assault': 'Police', 'shooting': 'Police', 'heart attack': 'Medical',
+            'unconscious': 'Medical', 'bleeding': 'Medical', 'help': 'Other'
+        }
+        
+        if not conversation.get("incident_type"):
+            for keyword, incident_type in incident_keywords.items():
+                if keyword in body_lower:
+                    conversation["incident_type"] = incident_type
+                    logger.info(f"SMS - Incident type detected: {incident_type}")
+                    break
+        
+        # Check if we should dispatch
+        has_location = conversation.get("location") is not None
+        has_incident = conversation.get("incident_type") is not None
+        should_dispatch = (message_count >= 4 and has_location) or (has_location and has_incident and message_count >= 3)
+        
+        if should_dispatch and conversation["status"] != "Active":
+            conversation["status"] = "Active"
+            logger.info(f"SMS - Dispatching for {From}: {conversation.get('incident_type', 'Unknown')} at {conversation.get('location', 'Unknown')}")
+        
+        # Update conversation in database
+        await db.active_calls.update_one(
+            {"caller_phone": From, "type": "sms", "status": {"$ne": "Closed"}},
+            {"$set": {
+                "conversation_history": conversation["conversation_history"],
+                "location": conversation.get("location"),
+                "incident_type": conversation.get("incident_type"),
+                "status": conversation["status"],
+                "description": Body,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        # Send SMS response via Twilio
+        if twilio_client:
+            message = twilio_client.messages.create(
+                body=response_text,
+                from_=TWILIO_PHONE_NUMBER,
+                to=From
+            )
+            logger.info(f"Sent SMS response to {From}: {response_text}")
+        
+        return Response(content="<?xml version='1.0' encoding='UTF-8'?><Response></Response>", media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(f"Error handling SMS from {From}: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Send error message
+        if twilio_client:
+            try:
+                twilio_client.messages.create(
+                    body="We're experiencing technical difficulties. Please call 911 for immediate assistance.",
+                    from_=TWILIO_PHONE_NUMBER,
+                    to=From
+                )
+            except:
+                pass
+        
+        return Response(content="<?xml version='1.0' encoding='UTF-8'?><Response></Response>", media_type="application/xml")
+
 @api_router.post("/webhooks/get-location")
 async def get_location(CallSid: str = Form(...), SpeechResult: str = Form(None)):
     """Get location details."""
