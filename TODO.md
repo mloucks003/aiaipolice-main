@@ -120,12 +120,13 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Balanced Threshold (v64)**
-- threshold: 0.65 (balanced - detects speech while filtering most background noise)
+**Current Approach: Higher Threshold for Noise Filtering (v65)**
+- threshold: 0.7 (higher threshold filters background noise like a real person would)
 - silence_duration_ms: 2000 (2 seconds)
 - prefix_padding_ms: 300 (standard)
 - max_response_output_tokens: 300
-- Goal: Find the sweet spot between detecting speech and filtering noise
+- Removed create_response flag (was causing intro to repeat)
+- Goal: Simple, clean VAD that filters noise naturally
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
@@ -142,7 +143,13 @@ MongoDB is configured but needs full integration with all features.
 - v56: threshold 0.5, silence 3000ms - FAILED (AI still gets cut off by background noise)
 - v57: threshold 0.9, silence 3000ms, prefix 500ms - FAILED (too high, not detecting user speech)
 - v58: threshold 0.7, silence 3000ms, prefix 500ms - FAILED (still not detecting user speech)
-- v59: threshold 0.6, silence 2000ms, prefix 300ms - CURRENT (moderate settings for reliability)
+- v59: threshold 0.6, silence 2000ms, prefix 300ms - worked in quiet, not noisy
+- v60: Added max_response_output_tokens: 300 - fixed AI cutoff issue
+- v61: threshold 0.75, silence 2000ms - still picked up background noise
+- v62: Delayed VAD activation - FAILED (intro repeated, overcomplicated)
+- v63: threshold 0.8, silence 2000ms - too high, not detecting user speech
+- v64: threshold 0.65, silence 2000ms - still issues with background noise
+- v65: threshold 0.7, silence 2000ms, removed create_response flag - CURRENT (clean, simple approach)
 
 ---
 
