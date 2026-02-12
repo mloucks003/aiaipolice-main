@@ -120,12 +120,12 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Moderate-High Threshold + Long Silence (v58)**
+**Current Approach: Moderate Threshold + Moderate Silence (v59)**
 - VAD ENABLED (required for transcription)
-- threshold: 0.7 (moderate-high - detects speech, filters most background noise)
-- silence_duration_ms: 3000 (3 seconds - gives user plenty of time to respond)
-- prefix_padding_ms: 500 (extra padding to capture speech start)
-- Goal: Balance between detecting user speech and filtering background noise
+- threshold: 0.6 (moderate - detects speech reliably without being too sensitive)
+- silence_duration_ms: 2000 (2 seconds - balance between responsiveness and user time)
+- prefix_padding_ms: 300 (standard)
+- Goal: Reliable speech detection with reasonable response time
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
@@ -141,7 +141,8 @@ MongoDB is configured but needs full integration with all features.
 - v55: threshold 0.5, silence 1200ms - FAILED (still cutting off user)
 - v56: threshold 0.5, silence 3000ms - FAILED (AI still gets cut off by background noise)
 - v57: threshold 0.9, silence 3000ms, prefix 500ms - FAILED (too high, not detecting user speech)
-- v58: threshold 0.7, silence 3000ms, prefix 500ms - CURRENT (balanced threshold + long silence)
+- v58: threshold 0.7, silence 3000ms, prefix 500ms - FAILED (still not detecting user speech)
+- v59: threshold 0.6, silence 2000ms, prefix 300ms - CURRENT (moderate settings for reliability)
 
 ---
 
