@@ -111,40 +111,25 @@ MongoDB is configured but needs full integration with all features.
 ---
 
 ### 5. Voice System Improvements
-**Status:** Working, Needs Tuning  
-**Priority:** MEDIUM
+**Status:** Implementing Manual Turn Detection  
+**Priority:** HIGH
 
-**Current Issues:**
-- Background noise can still cause occasional cutoffs
-- VAD settings may need per-environment tuning
+**Root Cause Identified:**
+- OpenAI's server-side VAD is unreliable for phone calls
+- VAD either cuts off caller OR cuts off AI responses
+- No middle ground works consistently
 
-**Tasks:**
-- [x] Fine-tune VAD settings based on real-world usage
-- [x] Add call recording functionality
-- [ ] Implement call quality monitoring
-- [ ] Add fallback to ElevenLabs if Realtime API fails
-- [ ] Optimize audio streaming latency
-- [ ] Add support for multiple languages (optional)
+**Solution: Manual Turn Detection (v52)**
+- DISABLED server-side VAD completely (`turn_detection: None`)
+- Implemented custom silence detection in Python
+- Monitors audio input timing
+- Triggers AI response after 1.5 seconds of silence
+- Uses `input_audio_buffer.commit` + `response.create` for manual turns
+- AI can now complete full responses without background noise interruption
 
-**Files:**
-- `backend/realtime_dispatcher.py` - Main voice handling
-- `backend/server.py` - Voice webhook endpoints
-
-**Current VAD Settings:**
-```python
-threshold: 0.5  # Balanced - detects speech but ignores background noise
-silence_duration_ms: 1200  # 1.2 seconds
-prefix_padding_ms: 300  # Standard padding
-```
-
-**Iteration History:**
-- v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
-- v46: threshold 0.7, silence 800ms - too fast, cutting off user
-- v47: threshold 0.8, silence 1000ms - still cutting off
-- v48: threshold 0.8, silence 1500ms - still cutting off
-- v49: threshold 0.85, silence 2000ms, prefix 600ms - still cutting off at beginning
-- v50: threshold 0.9, silence 2500ms, prefix 800ms - AI responses get cut off by background noise
-- v51: threshold 0.5, silence 1200ms, prefix 300ms - CURRENT (balanced approach)
+**Previous Iteration History:**
+- v43-v51: Various VAD threshold/silence combinations - all failed
+- v52: Manual turn detection - CURRENT (should fix all issues)
 
 ---
 

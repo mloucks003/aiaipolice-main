@@ -29,6 +29,8 @@ class RealtimeDispatcher:
         self.has_location = False
         self.has_incident_type = False
         self.should_dispatch = False
+        self.last_audio_time = None  # Track when we last received audio
+        self.silence_task = None  # Task for detecting silence
         
     async def connect_to_openai(self):
         """Connect to OpenAI Realtime API"""
@@ -88,12 +90,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,  # Balanced - sensitive enough to detect interruptions but not too sensitive
-                        "prefix_padding_ms": 300,  # Standard padding for speech start
-                        "silence_duration_ms": 1200  # 1.2 seconds - balance between responsiveness and not cutting off
-                    },
+                    "turn_detection": None,  # DISABLE server VAD - we'll handle turns manually
                     "temperature": 0.9,
                     "max_response_output_tokens": 150
                 }
@@ -132,14 +129,42 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
         except Exception as e:
             logger.error(f"Failed to trigger initial greeting for call {self.call_sid}: {e}")
         
+    async def check_for_silence(self):
+        """Monitor for silence and trigger AI response when user stops speaking"""
+        import time
+        while True:
+            await asyncio.sleep(0.5)  # Check every 500ms
+            
+            if self.last_audio_time:
+                silence_duration = time.time() - self.last_audio_time
+                
+                # If 1.5 seconds of silence, trigger AI response
+                if silence_duration >= 1.5:
+                    logger.info(f"Call {self.call_sid} - Detected 1.5s silence, triggering AI response")
+                    try:
+                        # Commit the audio buffer and trigger response
+                        await self.openai_ws.send(json.dumps({
+                            "type": "input_audio_buffer.commit"
+                        }))
+                        await self.openai_ws.send(json.dumps({
+                            "type": "response.create"
+                        }))
+                        self.last_audio_time = None  # Reset
+                    except Exception as e:
+                        logger.error(f"Error triggering response: {e}")
+        
     async def handle_twilio_audio(self, twilio_ws: WebSocket):
         """Handle incoming audio from Twilio and send to OpenAI"""
+        import time
         try:
             while True:
                 message = await twilio_ws.receive_text()
                 data = json.loads(message)
                 
                 if data['event'] == 'media':
+                    # Update last audio time
+                    self.last_audio_time = time.time()
+                    
                     # Forward audio to OpenAI
                     audio_append = {
                         "type": "input_audio_buffer.append",
@@ -341,11 +366,11 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
         try:
             await self.connect_to_openai()
             
-            # Run both handlers concurrently
-            # stream_sid is already set from constructor
+            # Run all handlers concurrently including silence detection
             await asyncio.gather(
                 self.handle_twilio_audio(twilio_ws),
-                self.handle_openai_responses(twilio_ws)
+                self.handle_openai_responses(twilio_ws),
+                self.check_for_silence()  # Add silence detection
             )
             
         except Exception as e:

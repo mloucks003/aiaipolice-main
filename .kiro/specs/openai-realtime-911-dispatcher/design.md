@@ -199,17 +199,20 @@ class RealtimeDispatcher:
         "input_audio_transcription": {
             "model": "whisper-1"
         },
-        "turn_detection": {
-            "type": "server_vad",
-            "threshold": 0.5,  # Balanced sensitivity
-            "prefix_padding_ms": 300,  # Standard padding
-            "silence_duration_ms": 1200  # 1.2 seconds for natural flow
-        },
+        "turn_detection": None,  # Disabled - using manual turn detection
         "temperature": 0.7,
         "max_response_output_tokens": 150
     }
 }
 ```
+
+**Manual Turn Detection**:
+The system implements custom silence detection:
+- Monitors audio input timing
+- Detects 1.5 seconds of silence
+- Commits audio buffer with `input_audio_buffer.commit`
+- Triggers response with `response.create`
+- Allows AI to complete full responses without interruption
 
 **Key Events**:
 

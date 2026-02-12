@@ -61,17 +61,17 @@ This specification defines the requirements for implementing OpenAI's Realtime A
 
 ### Requirement 4: Voice Activity Detection and Turn-Taking
 
-**User Story:** As a caller, I want natural conversation flow where I can speak without being cut off, and the AI can complete its responses without interruption from background noise.
+**User Story:** As a caller, I want natural conversation flow where the AI completes its full responses without interruption, and I can speak whenever I need to.
 
 #### Acceptance Criteria
 
-1. THE Session_Config SHALL enable server_vad (server-side Voice Activity Detection)
-2. THE VAD configuration SHALL set threshold to 0.5 for balanced sensitivity that detects intentional speech but ignores background noise
-3. THE VAD configuration SHALL set prefix_padding_ms to 300 to capture speech start
-4. THE VAD configuration SHALL set silence_duration_ms to 1200 to allow natural pauses without cutting off either party
-5. WHEN the caller starts speaking, THE Dispatcher_System SHALL allow interruption of AI speech
-6. WHEN VAD detects silence for the configured duration, THE Dispatcher_System SHALL trigger AI response generation
-7. THE VAD settings SHALL balance between allowing complete responses and enabling natural interruptions
+1. THE Session_Config SHALL disable server_vad by setting turn_detection to None
+2. THE Dispatcher_System SHALL implement manual turn detection by monitoring audio input timing
+3. THE Dispatcher_System SHALL trigger AI responses after 1.5 seconds of silence from the caller
+4. THE Dispatcher_System SHALL use input_audio_buffer.commit and response.create events for manual turn-taking
+5. WHEN the caller starts speaking, THE Dispatcher_System SHALL buffer audio without interrupting ongoing AI responses
+6. THE manual turn detection SHALL allow AI to complete full responses without cutoff from background noise
+7. THE system SHALL maintain natural conversation flow with appropriate pauses
 
 ### Requirement 5: Transcription and Call Logging
 
