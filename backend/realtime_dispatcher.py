@@ -29,7 +29,6 @@ class RealtimeDispatcher:
         self.has_location = False
         self.has_incident_type = False
         self.should_dispatch = False
-        self.greeting_complete = False  # Track if initial greeting is done
         
     async def connect_to_openai(self):
         """Connect to OpenAI Realtime API"""
@@ -89,7 +88,13 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": None,  # Start with VAD disabled for initial greeting
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.8,  # High threshold - like a real person filtering background noise
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 2000,
+                        "create_response": True
+                    },
                     "temperature": 0.9,
                     "max_response_output_tokens": 300  # Increased to allow longer responses without cutoff
                 }
@@ -233,27 +238,6 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                         )
                     
                 elif event_type == 'response.done':
-                    # After first response (greeting), enable VAD
-                    if not self.greeting_complete:
-                        self.greeting_complete = True
-                        logger.info(f"Call {self.call_sid} - Initial greeting complete, enabling VAD")
-                        
-                        # Enable VAD now that greeting is done
-                        vad_config = {
-                            "type": "session.update",
-                            "session": {
-                                "turn_detection": {
-                                    "type": "server_vad",
-                                    "threshold": 0.75,  # Higher threshold - filters background noise
-                                    "prefix_padding_ms": 400,  # Extra padding
-                                    "silence_duration_ms": 2000,  # 2 seconds
-                                    "create_response": True
-                                }
-                            }
-                        }
-                        await self.openai_ws.send(json.dumps(vad_config))
-                        logger.info(f"Call {self.call_sid} - VAD enabled for conversation")
-                    
                     # Check if we should dispatch
                     self.question_count += 1
                     logger.info(f"Call {self.call_sid} - Question count: {self.question_count}")
