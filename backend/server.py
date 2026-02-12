@@ -145,6 +145,8 @@ class ActiveCall(BaseModel):
     status: str = "Active"  # Active, Dispatched, Closed
     assigned_officer: Optional[str] = None
     transcription: Optional[str] = None
+    recording_url: Optional[str] = None  # Twilio recording URL
+    recording_duration: Optional[int] = None  # Duration in seconds
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -335,6 +337,15 @@ async def handle_incoming_call(
     await db.active_calls.insert_one(active_call.model_dump())
     
     response = VoiceResponse()
+    
+    # Start recording the call
+    response.record(
+        recording_status_callback=f"https://{request.headers.get('host', 'law-enforcement-rms-b2749bfd89b0.herokuapp.com')}/api/webhooks/recording-status",
+        recording_status_callback_method='POST',
+        recording_status_callback_event=['completed'],
+        max_length=3600,  # 1 hour max
+        transcribe=False  # We already have transcription from OpenAI
+    )
     
     # Try to use OpenAI Realtime API if available
     if OPENAI_API_KEY:
@@ -548,6 +559,34 @@ Example responses:
         response.redirect('/api/webhooks/hold-caller', method='POST')
     
     return Response(content=str(response), media_type="application/xml")
+
+@api_router.post("/webhooks/recording-status")
+async def recording_status_callback(
+    CallSid: str = Form(...),
+    RecordingUrl: str = Form(...),
+    RecordingDuration: str = Form(None),
+    RecordingSid: str = Form(None)
+):
+    """Callback from Twilio when call recording is complete"""
+    try:
+        logger.info(f"Recording completed for call {CallSid}: {RecordingUrl}")
+        
+        # Update the call record with recording URL
+        await db.active_calls.update_one(
+            {"call_sid": CallSid},
+            {"$set": {
+                "recording_url": RecordingUrl,
+                "recording_duration": int(RecordingDuration) if RecordingDuration else None,
+                "recording_sid": RecordingSid,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        logger.info(f"Updated call {CallSid} with recording URL")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error updating recording for call {CallSid}: {e}")
+        return {"status": "error", "message": str(e)}
 
 @api_router.post("/webhooks/get-location")
 async def get_location(CallSid: str = Form(...), SpeechResult: str = Form(None)):
@@ -936,6 +975,46 @@ async def get_active_calls(current_user: User = Depends(get_current_user)):
     ).sort("priority", 1).to_list(100)
     return calls
 
+@api_router.get("/calls/recordings")
+async def get_call_recordings(current_user: User = Depends(get_current_user)):
+    """Get all calls with recordings."""
+    calls = await db.active_calls.find(
+        {"recording_url": {"$exists": True, "$ne": None}},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return calls
+
+@api_router.get("/calls/{call_id}/recording")
+async def get_call_recording(call_id: str, current_user: User = Depends(get_current_user)):
+    """Get recording URL for a specific call."""
+    call = await db.active_calls.find_one({"id": call_id}, {"_id": 0})
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    
+    if not call.get('recording_url'):
+        raise HTTPException(status_code=404, detail="No recording available for this call")
+    
+    # Return the recording URL with authentication
+    recording_url = call['recording_url']
+    
+    # If it's a Twilio URL, add authentication
+    if 'twilio.com' in recording_url:
+        # Add .mp3 extension to get audio format
+        if not recording_url.endswith('.mp3'):
+            recording_url = recording_url + '.mp3'
+    
+    return {
+        "call_id": call_id,
+        "call_sid": call.get('call_sid'),
+        "recording_url": recording_url,
+        "recording_duration": call.get('recording_duration'),
+        "caller_phone": call.get('caller_phone'),
+        "incident_type": call.get('incident_type'),
+        "location": call.get('location'),
+        "created_at": call.get('created_at'),
+        "transcription": call.get('transcription')
+    }
+
 @api_router.post("/calls/{call_id}/attach")
 async def attach_to_call(call_id: str, current_user: User = Depends(get_current_user)):
     """Officer attaches to a call - dispatcher will announce this to caller."""
@@ -1278,6 +1357,12 @@ async def test_dispatch():
     """Serve test page for dispatch audio."""
     from fastapi.responses import FileResponse
     return FileResponse("/app/backend/test_dispatch_audio.html")
+
+# Recordings viewer page
+@app.get("/recordings")
+async def recordings_viewer():
+    """Serve recordings viewer page."""
+    return FileResponse(ROOT_DIR / "recordings_viewer.html")
 
 # Include router with all routes
 app.include_router(api_router)

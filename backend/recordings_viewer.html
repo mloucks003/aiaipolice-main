@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>911 Call Recordings - Patriot CAD Systems</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #1e3c72;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        .login-form {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        .login-form h2 {
+            color: #1e3c72;
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #1e3c72;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .btn:hover {
+            background: #2a5298;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .recordings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .recording-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .recording-card h3 {
+            color: #1e3c72;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .recording-info {
+            margin-bottom: 15px;
+        }
+        
+        .recording-info p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        
+        .recording-info strong {
+            color: #333;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 5px;
+        }
+        
+        .badge-medical { background: #fee; color: #c33; }
+        .badge-fire { background: #fef3cd; color: #856404; }
+        .badge-police { background: #d1ecf1; color: #0c5460; }
+        .badge-traffic { background: #e2e3e5; color: #383d41; }
+        
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+        
+        .transcription {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .transcription-toggle {
+            background: #e9ecef;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+        
+        .transcription-toggle:hover {
+            background: #dee2e6;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: white;
+            font-size: 18px;
+        }
+        
+        .no-recordings {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .logout-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            float: right;
+        }
+        
+        .logout-btn:hover {
+            background: #c82333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚨 911 Call Recordings</h1>
+            <p>Patriot CAD Systems - Emergency Call Management</p>
+            <button class="logout-btn hidden" id="logoutBtn">Logout</button>
+        </div>
+        
+        <div id="loginSection">
+            <div class="login-form">
+                <h2>Login Required</h2>
+                <div id="loginError" class="error hidden"></div>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" required>
+                    </div>
+                    <button type="submit" class="btn">Login</button>
+                </form>
+            </div>
+        </div>
+        
+        <div id="recordingsSection" class="hidden">
+            <div id="loadingMessage" class="loading">Loading recordings...</div>
+            <div id="recordingsGrid" class="recordings-grid hidden"></div>
+            <div id="noRecordings" class="no-recordings hidden">
+                <h2>No Recordings Available</h2>
+                <p>Call recordings will appear here after 911 calls are completed.</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let authToken = localStorage.getItem('authToken');
+        
+        // Check if already logged in
+        if (authToken) {
+            showRecordings();
+        }
+        
+        // Login form handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    authToken = data.access_token;
+                    localStorage.setItem('authToken', authToken);
+                    showRecordings();
+                } else {
+                    const error = await response.json();
+                    document.getElementById('loginError').textContent = error.detail || 'Login failed';
+                    document.getElementById('loginError').classList.remove('hidden');
+                }
+            } catch (error) {
+                document.getElementById('loginError').textContent = 'Network error. Please try again.';
+                document.getElementById('loginError').classList.remove('hidden');
+            }
+        });
+        
+        // Logout handler
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('authToken');
+            authToken = null;
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('recordingsSection').classList.add('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
+        });
+        
+        async function showRecordings() {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('recordingsSection').classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.remove('hidden');
+            
+            await loadRecordings();
+        }
+        
+        async function loadRecordings() {
+            try {
+                const response = await fetch('/api/calls/recordings', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load recordings');
+                }
+                
+                const recordings = await response.json();
+                
+                document.getElementById('loadingMessage').classList.add('hidden');
+                
+                if (recordings.length === 0) {
+                    document.getElementById('noRecordings').classList.remove('hidden');
+                } else {
+                    displayRecordings(recordings);
+                }
+            } catch (error) {
+                console.error('Error loading recordings:', error);
+                document.getElementById('loadingMessage').textContent = 'Error loading recordings. Please try again.';
+            }
+        }
+        
+        function displayRecordings(recordings) {
+            const grid = document.getElementById('recordingsGrid');
+            grid.classList.remove('hidden');
+            grid.innerHTML = '';
+            
+            recordings.forEach(call => {
+                const card = document.createElement('div');
+                card.className = 'recording-card';
+                
+                const incidentType = call.incident_type || 'Unknown';
+                const badgeClass = `badge-${incidentType.toLowerCase()}`;
+                
+                const duration = call.recording_duration 
+                    ? `${Math.floor(call.recording_duration / 60)}:${(call.recording_duration % 60).toString().padStart(2, '0')}`
+                    : 'Unknown';
+                
+                const date = new Date(call.created_at).toLocaleString();
+                
+                // Get recording URL with .mp3 extension
+                let recordingUrl = call.recording_url;
+                if (recordingUrl && !recordingUrl.endsWith('.mp3')) {
+                    recordingUrl += '.mp3';
+                }
+                
+                card.innerHTML = `
+                    <h3>Call ${call.call_sid.substring(0, 10)}...</h3>
+                    <div class="recording-info">
+                        <p><strong>Date:</strong> ${date}</p>
+                        <p><strong>Caller:</strong> ${call.caller_phone}</p>
+                        <p><strong>Type:</strong> <span class="badge ${badgeClass}">${incidentType}</span></p>
+                        <p><strong>Location:</strong> ${call.location || 'Unknown'}</p>
+                        <p><strong>Duration:</strong> ${duration}</p>
+                    </div>
+                    <audio controls>
+                        <source src="${recordingUrl}" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    ${call.transcription ? `
+                        <button class="transcription-toggle" onclick="toggleTranscription('${call.id}')">
+                            Show Transcription
+                        </button>
+                        <div id="transcription-${call.id}" class="transcription hidden">
+                            ${call.transcription.replace(/\n/g, '<br>')}
+                        </div>
+                    ` : ''}
+                `;
+                
+                grid.appendChild(card);
+            });
+        }
+        
+        function toggleTranscription(callId) {
+            const transcription = document.getElementById(`transcription-${callId}`);
+            const button = event.target;
+            
+            if (transcription.classList.contains('hidden')) {
+                transcription.classList.remove('hidden');
+                button.textContent = 'Hide Transcription';
+            } else {
+                transcription.classList.add('hidden');
+                button.textContent = 'Show Transcription';
+            }
+        }
+        
+        // Refresh recordings every 30 seconds
+        setInterval(() => {
+            if (authToken && !document.getElementById('recordingsSection').classList.contains('hidden')) {
+                loadRecordings();
+            }
+        }, 30000);
+    </script>
+</body>
+</html>

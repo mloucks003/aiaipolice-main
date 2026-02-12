@@ -119,8 +119,8 @@ MongoDB is configured but needs full integration with all features.
 - VAD settings may need per-environment tuning
 
 **Tasks:**
-- [ ] Fine-tune VAD settings based on real-world usage
-- [ ] Add call recording functionality
+- [x] Fine-tune VAD settings based on real-world usage
+- [x] Add call recording functionality
 - [ ] Implement call quality monitoring
 - [ ] Add fallback to ElevenLabs if Realtime API fails
 - [ ] Optimize audio streaming latency
@@ -230,11 +230,16 @@ heroku ps             # Check dyno status
 **Workaround:** VAD threshold set to 0.9 with 3-second silence duration  
 **Next Steps:** Monitor real-world usage and adjust as needed
 
-### Issue 2: No Call Recording
-**Status:** Not Implemented  
-**Description:** Calls are transcribed but not recorded as audio  
-**Impact:** Cannot review actual call audio  
-**Next Steps:** Implement audio recording to S3 or similar storage
+### Issue 2: Call Recording
+**Status:** ✅ IMPLEMENTED  
+**Description:** Calls are now recorded using Twilio's recording feature  
+**Access:** Visit https://your-domain.com/recordings to view and play recordings  
+**Features:** 
+- Automatic recording of all 911 calls
+- Recordings stored with call metadata
+- Web interface to browse and play recordings
+- Transcriptions displayed alongside audio
+**Next Steps:** Consider adding download functionality and long-term archival
 
 ### Issue 3: Limited Error Handling
 **Status:** Basic Error Handling  
