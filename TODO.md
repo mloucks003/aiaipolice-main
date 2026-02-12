@@ -120,12 +120,12 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Balanced VAD Settings (v55)**
+**Current Approach: Balanced VAD Settings (v56)**
 - VAD ENABLED (required for transcription)
 - threshold: 0.5 (lower = more sensitive to speech, less likely to cut off AI)
-- silence_duration_ms: 1200 (1.2 seconds - gives user time to respond)
+- silence_duration_ms: 3000 (3 seconds - gives user plenty of time to respond)
 - prefix_padding_ms: 300 (standard)
-- Goal: AI completes long responses + user has time to speak
+- Goal: AI completes long responses + user has ample time to speak
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
@@ -138,7 +138,8 @@ MongoDB is configured but needs full integration with all features.
 - v52: VAD disabled, manual turn detection - FAILED (doesn't hear user responses)
 - v53: threshold 0.8, silence 2000ms - FAILED (AI interrupts before user can speak)
 - v54: threshold 0.6, silence 800ms - NOT DEPLOYED
-- v55: threshold 0.5, silence 1200ms - CURRENT (balanced: lower threshold + longer silence)
+- v55: threshold 0.5, silence 1200ms - FAILED (still cutting off user)
+- v56: threshold 0.5, silence 3000ms - CURRENT (low threshold + long silence for max user time)
 
 ---
 

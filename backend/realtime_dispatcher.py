@@ -92,7 +92,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy.""",
                         "type": "server_vad",
                         "threshold": 0.5,  # Lower threshold - more sensitive to speech
                         "prefix_padding_ms": 300,  # Standard padding
-                        "silence_duration_ms": 1200,  # 1.2 seconds - gives user time to respond
+                        "silence_duration_ms": 3000,  # 3 seconds - gives user plenty of time to respond
                         "create_response": True  # Auto-create responses after silence
                     },
                     "temperature": 0.9,
