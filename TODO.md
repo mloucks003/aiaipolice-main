@@ -111,25 +111,34 @@ MongoDB is configured but needs full integration with all features.
 ---
 
 ### 5. Voice System Improvements
-**Status:** Implementing Manual Turn Detection  
+**Status:** Optimizing VAD Settings  
 **Priority:** HIGH
 
 **Root Cause Identified:**
-- OpenAI's server-side VAD is unreliable for phone calls
-- VAD either cuts off caller OR cuts off AI responses
-- No middle ground works consistently
+- OpenAI's server-side VAD needs careful tuning for phone calls
+- Too high threshold = AI gets cut off by background noise
+- Too short silence duration = AI interrupts before user can speak
+- VAD is REQUIRED for transcription (cannot be disabled)
 
-**Solution: Manual Turn Detection (v52)**
-- DISABLED server-side VAD completely (`turn_detection: None`)
-- Implemented custom silence detection in Python
-- Monitors audio input timing
-- Triggers AI response after 1.5 seconds of silence
-- Uses `input_audio_buffer.commit` + `response.create` for manual turns
-- AI can now complete full responses without background noise interruption
+**Current Approach: Balanced VAD Settings (v55)**
+- VAD ENABLED (required for transcription)
+- threshold: 0.5 (lower = more sensitive to speech, less likely to cut off AI)
+- silence_duration_ms: 1200 (1.2 seconds - gives user time to respond)
+- prefix_padding_ms: 300 (standard)
+- Goal: AI completes long responses + user has time to speak
 
-**Previous Iteration History:**
-- v43-v51: Various VAD threshold/silence combinations - all failed
-- v52: Manual turn detection - CURRENT (should fix all issues)
+**Iteration History:**
+- v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
+- v46: threshold 0.7, silence 800ms - too fast, cutting off user
+- v47: threshold 0.8, silence 1000ms - still cutting off
+- v48: threshold 0.8, silence 1500ms - still cutting off
+- v49: threshold 0.85, silence 2000ms, prefix 600ms - still cutting off at beginning
+- v50: threshold 0.9, silence 2500ms, prefix 800ms - AI responses get cut off by background noise
+- v51: threshold 0.5, silence 1200ms, prefix 300ms - balanced approach, still issues
+- v52: VAD disabled, manual turn detection - FAILED (doesn't hear user responses)
+- v53: threshold 0.8, silence 2000ms - FAILED (AI interrupts before user can speak)
+- v54: threshold 0.6, silence 800ms - NOT DEPLOYED
+- v55: threshold 0.5, silence 1200ms - CURRENT (balanced: lower threshold + longer silence)
 
 ---
 
