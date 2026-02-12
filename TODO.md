@@ -120,15 +120,15 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Moderate Threshold + Increased Token Limit (v60)**
+**Current Approach: Noise-Resistant Settings (v61)**
 - VAD ENABLED (required for transcription)
-- threshold: 0.6 (moderate - detects speech reliably without being too sensitive)
+- threshold: 0.75 (higher - filters background noise in loud/emergency environments)
 - silence_duration_ms: 2000 (2 seconds - balance between responsiveness and user time)
-- prefix_padding_ms: 300 (standard)
-- max_response_output_tokens: 300 (increased from 150 to allow longer AI responses)
-- Goal: Reliable speech detection + allow AI to complete full responses
+- prefix_padding_ms: 400 (extra padding to ensure speech start is captured)
+- max_response_output_tokens: 300 (allows longer AI responses)
+- Goal: Work reliably in quiet AND loud emergency environments
 
-**Key Finding:** Response time is good, but AI gets cut off during long responses even in quiet environments. This indicates the issue is token limit, not VAD settings.
+**Key Finding:** v60 works great in quiet environments. v61 increases threshold for noisy emergency scenarios (sirens, traffic, chaos).
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
