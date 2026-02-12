@@ -26,6 +26,13 @@ from realtime_dispatcher import RealtimeDispatcher
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# Configure logging early
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Audio cache directory
 AUDIO_CACHE_DIR = ROOT_DIR / "audio_cache"
 AUDIO_CACHE_DIR.mkdir(exist_ok=True)
@@ -1470,12 +1477,6 @@ if FRONTEND_BUILD_DIR.exists() and FRONTEND_STATIC_DIR.exists():
             raise HTTPException(status_code=404, detail="Frontend not built")
 else:
     logger.warning(f"Frontend build directory not found at {FRONTEND_BUILD_DIR}. Serving API only.")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
