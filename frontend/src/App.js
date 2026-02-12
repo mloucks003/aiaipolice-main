@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import '@/App.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import OfficerMDT from './pages/OfficerMDT';
 import AdminPanel from './pages/AdminPanel';
@@ -85,7 +86,8 @@ function App() {
               )
             }
           />
-          <Route path="/" element={<Navigate to="/login" />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />
