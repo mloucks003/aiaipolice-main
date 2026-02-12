@@ -1444,8 +1444,11 @@ app.include_router(api_router)
 
 # Serve React frontend static files
 FRONTEND_BUILD_DIR = Path(__file__).parent.parent / "frontend" / "build"
-if FRONTEND_BUILD_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_BUILD_DIR / "static")), name="static")
+FRONTEND_STATIC_DIR = FRONTEND_BUILD_DIR / "static"
+
+# Only mount static files if they exist
+if FRONTEND_BUILD_DIR.exists() and FRONTEND_STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_STATIC_DIR)), name="static")
     
     @app.get("/{full_path:path}")
     async def serve_react_app(full_path: str):
@@ -1460,7 +1463,13 @@ if FRONTEND_BUILD_DIR.exists():
             return FileResponse(file_path)
         
         # Otherwise serve index.html (for React Router)
-        return FileResponse(FRONTEND_BUILD_DIR / "index.html")
+        index_file = FRONTEND_BUILD_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        else:
+            raise HTTPException(status_code=404, detail="Frontend not built")
+else:
+    logger.warning(f"Frontend build directory not found at {FRONTEND_BUILD_DIR}. Serving API only.")
 
 logging.basicConfig(
     level=logging.INFO,
