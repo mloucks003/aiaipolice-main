@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Zap, Shield, Brain, Radio, MapPin, Users, ChevronRight, Play, AlertCircle, Clock, CheckCircle } from 'lucide-react';
+import { Phone, Zap, Shield, Brain, Radio, MapPin, Users, ChevronRight, Play, AlertCircle, Clock, CheckCircle, Mic, Volume2 } from 'lucide-react';
 
 const LandingPage = () => {
   const navigate = useNavigate();
   const [scrollY, setScrollY] = useState(0);
   const [activeCalls, setActiveCalls] = useState([]);
+  const [conversationStep, setConversationStep] = useState(0);
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -62,6 +63,41 @@ const LandingPage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Simulate conversation flow for AI demo
+  useEffect(() => {
+    const conversationSteps = [
+      { speaker: 'ai', text: '911, what\'s your emergency?', duration: 2000 },
+      { speaker: 'caller', text: 'There\'s a fire at 892 Maple Avenue!', duration: 2500 },
+      { speaker: 'ai', text: 'I understand. Are you in a safe location right now?', duration: 2500 },
+      { speaker: 'caller', text: 'Yes, I\'m across the street. Smoke is coming from the roof.', duration: 3000 },
+      { speaker: 'ai', text: 'Help is on the way. Fire units have been dispatched.', duration: 2500 }
+    ];
+
+    let currentStep = 0;
+    let timeout;
+
+    const advanceConversation = () => {
+      if (currentStep < conversationSteps.length) {
+        setConversationStep(currentStep);
+        timeout = setTimeout(() => {
+          currentStep++;
+          advanceConversation();
+        }, conversationSteps[currentStep].duration);
+      } else {
+        // Reset after completion
+        timeout = setTimeout(() => {
+          setConversationStep(0);
+          currentStep = 0;
+          advanceConversation();
+        }, 3000);
+      }
+    };
+
+    advanceConversation();
+
+    return () => clearTimeout(timeout);
+  }, []);
+
   const features = [
     {
       icon: <Brain className="w-8 h-8" />,
@@ -106,6 +142,14 @@ const LandingPage = () => {
     { value: "24/7", label: "AI Availability" },
     { value: "100%", label: "Call Recording" },
     { value: "Real-time", label: "Transcription" }
+  ];
+
+  const conversationSteps = [
+    { speaker: 'ai', text: '911, what\'s your emergency?', duration: 2000 },
+    { speaker: 'caller', text: 'There\'s a fire at 892 Maple Avenue!', duration: 2500 },
+    { speaker: 'ai', text: 'I understand. Are you in a safe location right now?', duration: 2500 },
+    { speaker: 'caller', text: 'Yes, I\'m across the street. Smoke is coming from the roof.', duration: 3000 },
+    { speaker: 'ai', text: 'Help is on the way. Fire units have been dispatched.', duration: 2500 }
   ];
 
   return (
@@ -196,40 +240,6 @@ const LandingPage = () => {
 
         {/* Gradient overlay */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black to-transparent" />
-      </div>
-
-      {/* Features Section */}
-      <div className="relative py-20">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Built for <span className="text-blue-400">Modern Emergency Response</span>
-            </h2>
-            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
-              A complete Computer-Aided Dispatch system with AI at its core
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
-            {features.map((feature, index) => (
-              <div
-                key={index}
-                className="group relative p-8 bg-gradient-to-br from-gray-800/50 to-gray-900/50 border border-gray-800 rounded-2xl hover:border-blue-500/50 transition-all duration-300 hover:transform hover:scale-105"
-              >
-                <div className="absolute top-4 right-4 px-3 py-1 bg-blue-500/10 border border-blue-500/30 rounded-full text-xs text-blue-400">
-                  {feature.highlight}
-                </div>
-                
-                <div className="text-blue-400 mb-4 group-hover:scale-110 transition-transform duration-300">
-                  {feature.icon}
-                </div>
-                
-                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
-                <p className="text-gray-400 leading-relaxed">{feature.description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Live Demo Section */}
@@ -336,6 +346,211 @@ const LandingPage = () => {
             <p className="text-center text-gray-500 text-sm mt-6">
               This is a simulated demo. Real calls are processed with AI voice recognition and natural language understanding.
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Features Section */}
+      <div className="relative py-20">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Built for <span className="text-blue-400">Modern Emergency Response</span>
+            </h2>
+            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+              A complete Computer-Aided Dispatch system with AI at its core
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
+            {features.map((feature, index) => (
+              <div
+                key={index}
+                className="group relative p-8 bg-gradient-to-br from-gray-800/50 to-gray-900/50 border border-gray-800 rounded-2xl hover:border-blue-500/50 transition-all duration-300 hover:transform hover:scale-105"
+              >
+                <div className="absolute top-4 right-4 px-3 py-1 bg-blue-500/10 border border-blue-500/30 rounded-full text-xs text-blue-400">
+                  {feature.highlight}
+                </div>
+                
+                <div className="text-blue-400 mb-4 group-hover:scale-110 transition-transform duration-300">
+                  {feature.icon}
+                </div>
+                
+                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                <p className="text-gray-400 leading-relaxed">{feature.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* AI Voice Conversation Demo */}
+      <div className="relative py-20 bg-gradient-to-b from-gray-900 to-black">
+        <div className="container mx-auto px-6">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4">
+                Natural <span className="text-blue-400">Voice Conversations</span>
+              </h2>
+              <p className="text-gray-400 text-lg">
+                Experience true voice-to-voice AI with OpenAI Realtime API
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Conversation Flow */}
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                <div className="flex items-center space-x-3 mb-6">
+                  <div className="p-2 bg-blue-500/20 rounded-lg">
+                    <Phone className="w-5 h-5 text-blue-400" />
+                  </div>
+                  <h3 className="text-xl font-bold">Live Conversation</h3>
+                </div>
+
+                <div className="space-y-4 min-h-[400px]">
+                  {conversationSteps.slice(0, conversationStep + 1).map((step, index) => (
+                    <div
+                      key={index}
+                      className={`flex ${step.speaker === 'ai' ? 'justify-start' : 'justify-end'} animate-slideIn`}
+                    >
+                      <div className={`max-w-[80%] ${
+                        step.speaker === 'ai' 
+                          ? 'bg-blue-500/20 border-blue-500/30' 
+                          : 'bg-gray-800 border-gray-700'
+                      } border rounded-2xl p-4`}>
+                        <div className="flex items-center space-x-2 mb-2">
+                          {step.speaker === 'ai' ? (
+                            <>
+                              <Brain className="w-4 h-4 text-blue-400" />
+                              <span className="text-xs font-semibold text-blue-400">AI Dispatcher</span>
+                            </>
+                          ) : (
+                            <>
+                              <Mic className="w-4 h-4 text-gray-400" />
+                              <span className="text-xs font-semibold text-gray-400">Caller</span>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-sm leading-relaxed">{step.text}</p>
+                        
+                        {/* Audio waveform visualization */}
+                        {index === conversationStep && (
+                          <div className="flex items-center space-x-1 mt-3">
+                            {[...Array(20)].map((_, i) => (
+                              <div
+                                key={i}
+                                className={`w-1 rounded-full ${
+                                  step.speaker === 'ai' ? 'bg-blue-400' : 'bg-gray-400'
+                                }`}
+                                style={{
+                                  height: `${Math.random() * 16 + 8}px`,
+                                  animation: 'pulse 0.8s ease-in-out infinite',
+                                  animationDelay: `${i * 0.05}s`
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* How It Works */}
+              <div className="space-y-6">
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="p-2 bg-cyan-500/20 rounded-lg">
+                      <Zap className="w-5 h-5 text-cyan-400" />
+                    </div>
+                    <h3 className="text-xl font-bold">How It Works</h3>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-blue-500/20 border border-blue-500/30 rounded-full flex items-center justify-center text-sm font-bold text-blue-400">
+                        1
+                      </div>
+                      <div>
+                        <h4 className="font-semibold mb-1">Caller Dials 911</h4>
+                        <p className="text-sm text-gray-400">Phone call connects to Twilio, which streams audio to our system</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-blue-500/20 border border-blue-500/30 rounded-full flex items-center justify-center text-sm font-bold text-blue-400">
+                        2
+                      </div>
+                      <div>
+                        <h4 className="font-semibold mb-1">AI Processes Voice</h4>
+                        <p className="text-sm text-gray-400">OpenAI Realtime API converts speech to text and understands context in real-time</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-blue-500/20 border border-blue-500/30 rounded-full flex items-center justify-center text-sm font-bold text-blue-400">
+                        3
+                      </div>
+                      <div>
+                        <h4 className="font-semibold mb-1">Natural Response</h4>
+                        <p className="text-sm text-gray-400">AI generates empathetic response and converts to natural-sounding voice</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-blue-500/20 border border-blue-500/30 rounded-full flex items-center justify-center text-sm font-bold text-blue-400">
+                        4
+                      </div>
+                      <div>
+                        <h4 className="font-semibold mb-1">Auto Dispatch</h4>
+                        <p className="text-sm text-gray-400">System extracts location and incident type, then dispatches appropriate units</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/30 rounded-2xl p-6">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <Volume2 className="w-5 h-5 text-blue-400" />
+                    <h4 className="font-bold">Key Features</h4>
+                  </div>
+                  <ul className="space-y-2 text-sm text-gray-300">
+                    <li className="flex items-center space-x-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                      <span>Sub-500ms latency for instant responses</span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                      <span>Natural interruptions and turn-taking</span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                      <span>Empathetic, human-like voice quality</span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                      <span>Real-time transcription and logging</span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                      <span>Automatic incident classification</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center mt-8">
+              <button
+                onClick={() => window.open('tel:+18704992134')}
+                className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center space-x-2 shadow-lg shadow-blue-500/50 mx-auto"
+              >
+                <Phone className="w-5 h-5" />
+                <span className="font-semibold">Try It Now: +1 (870) 499-2134</span>
+                <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
