@@ -100,7 +100,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                         "type": "server_vad",
                         "threshold": 0.7,  # Higher threshold filters background noise like a real person would
                         "prefix_padding_ms": 300,
-                        "silence_duration_ms": 2000
+                        "silence_duration_ms": 1500  # 1.5 seconds - faster response without being too aggressive
                     },
                     "temperature": 0.9,
                     "max_response_output_tokens": 300  # Increased to allow longer responses without cutoff
