@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-slideIn {
+    animation: slideIn 0.5s ease-out forwards;
+}
+
 body {
     margin: 0;
     font-family:
