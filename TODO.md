@@ -120,15 +120,12 @@ MongoDB is configured but needs full integration with all features.
 - Too short silence duration = AI interrupts before user can speak
 - VAD is REQUIRED for transcription (cannot be disabled)
 
-**Current Approach: Simple High Threshold (v63)**
-- VAD ENABLED from start with consistent settings:
-  - threshold: 0.8 (high - filters background noise like a real person would)
-  - silence_duration_ms: 2000 (2 seconds)
-  - prefix_padding_ms: 300 (standard)
-- max_response_output_tokens: 300 (allows longer AI responses)
-- Goal: Simple, consistent noise filtering throughout the entire call
-
-**Key Insight:** Overthinking it. Just use a high threshold (0.8) consistently - mimics how a real person naturally filters out background noise.
+**Current Approach: Balanced Threshold (v64)**
+- threshold: 0.65 (balanced - detects speech while filtering most background noise)
+- silence_duration_ms: 2000 (2 seconds)
+- prefix_padding_ms: 300 (standard)
+- max_response_output_tokens: 300
+- Goal: Find the sweet spot between detecting speech and filtering noise
 
 **Iteration History:**
 - v43: threshold 0.9, silence 3000ms - too slow (3 second delay)
