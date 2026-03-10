@@ -8,7 +8,7 @@ import ReportWriter from '../components/ReportWriter';
 import AITools from '../components/AITools';
 import ActiveCalls from '../components/ActiveCalls';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
 
 export default function OfficerMDT({ user, token, onLogout }) {
