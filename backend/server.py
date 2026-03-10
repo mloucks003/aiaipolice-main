@@ -344,6 +344,14 @@ async def update_user(user_id: str, active: bool, current_user: User = Depends(g
     await db.users.update_one({"id": user_id}, {"$set": {"active": active}})
     return {"message": "User updated"}
 
+@api_router.delete("/admin/calls")
+async def clear_all_calls(current_user: User = Depends(get_current_user)):
+    if current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    result = await db.active_calls.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} calls"}
+
 # Twilio Webhook Endpoints (under /api prefix for Kubernetes routing)
 @api_router.post("/webhooks/voice")
 async def handle_incoming_call(
