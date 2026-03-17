@@ -60,6 +60,28 @@ OFFICER_RADIO_FUNCTIONS = [
                 "priority": {"type": "integer", "description": "Filter by priority level 1-5 (1=Critical, 5=Low). Omit for all priorities."}
             }
         }
+    },
+    {
+        "type": "function",
+        "name": "acknowledge_call",
+        "description": "Officer acknowledges/responds to a call. Use when the officer says they'll take a call, respond to a call, or acknowledge a dispatch. Marks the call as Dispatched and assigns the officer.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "call_id": {"type": "string", "description": "The call ID to acknowledge. If not provided, acknowledges the most recent active call."}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "name": "arrive_on_scene",
+        "description": "Officer reports arriving on scene at a call location. Use when the officer says they're on scene, arrived, or at the location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "call_id": {"type": "string", "description": "The call ID. If not provided, uses the officer's currently assigned call."}
+            }
+        }
     }
 ]
 
@@ -338,6 +360,8 @@ You can search for:
 1. Person records (by name, driver's license, or date of birth)
 2. Vehicle records (by license plate number and state)
 3. Active 911 calls and incidents (current calls, dispatched units, priorities)
+4. Acknowledge/respond to a call (officer takes a call)
+5. Mark arrival on scene (officer arrives at call location)
 
 CONVERSATION FLOW:
 1. Listen to the officer's request
@@ -369,6 +393,14 @@ Then: "We have 3 active calls. Priority 1 domestic disturbance at 123 Main Stree
 Officer: "Any high priority calls?"
 You: [call get_active_calls with priority filter]
 Then: "One priority 1 call — armed robbery in progress at the Gas N Go on 5th Street, no units assigned yet"
+
+Officer: "I'll take that call" or "I'll respond to that"
+You: [call acknowledge_call]
+Then: "Copy, you're assigned to the robbery at Gas N Go on 5th Street"
+
+Officer: "I'm on scene" or "I've arrived"
+You: [call arrive_on_scene]
+Then: "Copy, marked on scene at Gas N Go on 5th Street"
 
 Keep it professional and efficient.""",
                     "voice": "alloy",
@@ -637,6 +669,10 @@ Keep it professional and efficient.""",
                 return await self.search_vehicle(arguments)
             elif function_name == "get_active_calls":
                 return await self.get_active_calls(arguments)
+            elif function_name == "acknowledge_call":
+                return await self.acknowledge_call(arguments)
+            elif function_name == "arrive_on_scene":
+                return await self.arrive_on_scene(arguments)
             else:
                 return {"error": f"Unknown function: {function_name}"}
         except Exception as e:
@@ -734,6 +770,86 @@ Keep it professional and efficient.""",
         except Exception as e:
             logger.error(f"Error in get_active_calls: {e}")
             return {"error": f"Database query failed: {str(e)}"}
+    
+    async def acknowledge_call(self, params: dict):
+        """Officer acknowledges/responds to a call"""
+        try:
+            call_id = params.get('call_id')
+            
+            if call_id:
+                call = await self.db.active_calls.find_one({"id": call_id, "status": "Active"}, {"_id": 0})
+            else:
+                # Find most recent active unassigned call
+                call = await self.db.active_calls.find_one(
+                    {"status": "Active", "assigned_officer": None},
+                    {"_id": 0},
+                    sort=[("created_at", -1)]
+                )
+            
+            if not call:
+                return {"success": False, "message": "No active unassigned calls found"}
+            
+            await self.db.active_calls.update_one(
+                {"id": call['id']},
+                {"$set": {
+                    "assigned_officer": self.officer_id,
+                    "status": "Dispatched",
+                    "officer_notified": True,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
+            return {
+                "success": True,
+                "message": f"You are now responding to {call.get('incident_type', 'call')} at {call.get('location', 'unknown location')}",
+                "call_id": call['id'],
+                "incident_type": call.get('incident_type'),
+                "location": call.get('location'),
+                "priority": call.get('priority')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in acknowledge_call: {e}")
+            return {"error": f"Failed to acknowledge call: {str(e)}"}
+    
+    async def arrive_on_scene(self, params: dict):
+        """Officer reports arriving on scene"""
+        try:
+            call_id = params.get('call_id')
+            
+            if call_id:
+                call = await self.db.active_calls.find_one({"id": call_id, "assigned_officer": self.officer_id}, {"_id": 0})
+            else:
+                # Find officer's currently assigned call
+                call = await self.db.active_calls.find_one(
+                    {"assigned_officer": self.officer_id, "status": "Dispatched"},
+                    {"_id": 0},
+                    sort=[("updated_at", -1)]
+                )
+            
+            if not call:
+                return {"success": False, "message": "No dispatched call found assigned to you"}
+            
+            await self.db.active_calls.update_one(
+                {"id": call['id']},
+                {"$set": {
+                    "officer_on_scene": True,
+                    "status": "On Scene",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
+            return {
+                "success": True,
+                "message": f"Marked on scene at {call.get('location', 'location')} for {call.get('incident_type', 'call')}",
+                "call_id": call['id'],
+                "incident_type": call.get('incident_type'),
+                "location": call.get('location')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in arrive_on_scene: {e}")
+            return {"error": f"Failed to mark on scene: {str(e)}"}
     
     async def run(self):
         """Main loop - bidirectional audio streaming"""
