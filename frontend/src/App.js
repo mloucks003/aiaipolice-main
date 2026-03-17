@@ -69,7 +69,7 @@ function App() {
           <Route
             path="/dispatch"
             element={
-              token && user?.role === 'dispatcher' ? (
+              token && (user?.role === 'dispatcher' || user?.role === 'admin') ? (
                 <DispatcherDashboard user={user} token={token} onLogout={handleLogout} />
               ) : (
                 <Navigate to="/login" />

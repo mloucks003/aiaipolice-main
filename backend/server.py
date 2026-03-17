@@ -1286,12 +1286,228 @@ async def mark_on_scene(call_id: str, current_user: User = Depends(get_current_u
 
 @api_router.post("/calls/{call_id}/close")
 async def close_call(call_id: str, current_user: User = Depends(get_current_user)):
-    """Close/complete a call."""
-    await db.active_calls.update_one(
-        {"id": call_id},
-        {"$set": {"status": "Closed", "updated_at": datetime.now(timezone.utc).isoformat()}}
+    """Close/complete a call with optional disposition."""
+    return await _close_call_internal(call_id)
+
+async def _close_call_internal(call_id: str, disposition: str = None, disposition_notes: str = None):
+    """Internal close call logic."""
+    update = {"status": "Closed", "updated_at": datetime.now(timezone.utc).isoformat(), "closed_at": datetime.now(timezone.utc).isoformat()}
+    if disposition:
+        update["disposition"] = disposition
+    if disposition_notes:
+        update["disposition_notes"] = disposition_notes
+    await db.active_calls.update_one({"id": call_id}, {"$set": update})
+    # Also free up any units assigned to this call
+    await db.units.update_many(
+        {"assigned_call_id": call_id},
+        {"$set": {"status": "Available", "assigned_call_id": None, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     return {"message": "Call closed"}
+
+@api_router.post("/calls/{call_id}/close-with-disposition")
+async def close_call_with_disposition(call_id: str, data: dict, current_user: User = Depends(get_current_user)):
+    """Close a call with disposition code."""
+    return await _close_call_internal(call_id, data.get("disposition"), data.get("disposition_notes"))
+
+# ===== CALL EDITING =====
+@api_router.put("/calls/{call_id}")
+async def update_call(call_id: str, data: dict, current_user: User = Depends(get_current_user)):
+    """Update call details (priority, location, incident_type, description)."""
+    allowed = {"priority", "location", "incident_type", "description", "caller_phone"}
+    update = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.active_calls.update_one({"id": call_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {"message": "Call updated"}
+
+# ===== CALL NOTES =====
+@api_router.post("/calls/{call_id}/notes")
+async def add_call_note(call_id: str, data: dict, current_user: User = Depends(get_current_user)):
+    """Add a note/comment to a call."""
+    note = {
+        "id": str(uuid.uuid4()),
+        "text": data.get("text", ""),
+        "author": current_user.full_name,
+        "badge": current_user.badge_number,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    result = await db.active_calls.update_one(
+        {"id": call_id},
+        {"$push": {"notes": note}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return note
+
+@api_router.get("/calls/{call_id}/notes")
+async def get_call_notes(call_id: str, current_user: User = Depends(get_current_user)):
+    """Get all notes for a call."""
+    call = await db.active_calls.find_one({"id": call_id}, {"notes": 1})
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call.get("notes", [])
+
+# ===== CALL HISTORY =====
+@api_router.get("/calls/history")
+async def get_call_history(limit: int = 50, current_user: User = Depends(get_current_user)):
+    """Get closed/historical calls."""
+    calls = await db.active_calls.find(
+        {"status": "Closed"},
+        {"_id": 0}
+    ).sort("closed_at", -1).to_list(limit)
+    return calls
+
+# ===== UNITS MANAGEMENT =====
+@api_router.get("/units")
+async def get_units(current_user: User = Depends(get_current_user)):
+    """Get all units."""
+    units = await db.units.find({}, {"_id": 0}).to_list(100)
+    return units
+
+@api_router.post("/units")
+async def create_unit(data: dict, current_user: User = Depends(get_current_user)):
+    """Create a new unit."""
+    unit = {
+        "id": str(uuid.uuid4()),
+        "callsign": data.get("callsign", ""),
+        "type": data.get("type", "Police"),  # Police, Fire, EMS
+        "status": "Available",  # Available, En Route, On Scene, Out of Service
+        "assigned_officer": data.get("assigned_officer", None),
+        "assigned_officer_name": data.get("assigned_officer_name", None),
+        "assigned_call_id": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.units.insert_one(unit)
+    return unit
+
+@api_router.put("/units/{unit_id}")
+async def update_unit(unit_id: str, data: dict, current_user: User = Depends(get_current_user)):
+    """Update a unit."""
+    allowed = {"callsign", "type", "status", "assigned_officer", "assigned_officer_name"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.units.update_one({"id": unit_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    return {"message": "Unit updated"}
+
+@api_router.delete("/units/{unit_id}")
+async def delete_unit(unit_id: str, current_user: User = Depends(get_current_user)):
+    """Delete a unit."""
+    result = await db.units.delete_one({"id": unit_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    return {"message": "Unit deleted"}
+
+@api_router.put("/units/{unit_id}/status")
+async def update_unit_status(unit_id: str, data: dict, current_user: User = Depends(get_current_user)):
+    """Update unit status."""
+    new_status = data.get("status")
+    if new_status not in ["Available", "En Route", "On Scene", "Out of Service"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    update = {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if new_status == "Available":
+        update["assigned_call_id"] = None
+    result = await db.units.update_one({"id": unit_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    return {"message": f"Unit status updated to {new_status}"}
+
+# ===== DISPATCH =====
+@api_router.post("/dispatch")
+async def dispatch_units(data: dict, current_user: User = Depends(get_current_user)):
+    """Dispatch units to a call/incident."""
+    call_id = data.get("call_id") or data.get("incident_id")
+    unit_ids = data.get("unit_ids", [])
+    if not call_id or not unit_ids:
+        raise HTTPException(status_code=400, detail="call_id and unit_ids required")
+    
+    # Verify call exists
+    call = await db.active_calls.find_one({"id": call_id}, {"_id": 0})
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    
+    dispatched = []
+    for uid in unit_ids:
+        unit = await db.units.find_one({"id": uid})
+        if unit:
+            await db.units.update_one(
+                {"id": uid},
+                {"$set": {"status": "En Route", "assigned_call_id": call_id, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            dispatched.append(unit.get("callsign", uid))
+    
+    # Update call status
+    await db.active_calls.update_one(
+        {"id": call_id},
+        {"$set": {"status": "Dispatched", "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Add auto-note
+    note = {
+        "id": str(uuid.uuid4()),
+        "text": f"Units dispatched: {', '.join(dispatched)}",
+        "author": "SYSTEM",
+        "badge": "DISPATCH",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.active_calls.update_one({"id": call_id}, {"$push": {"notes": note}})
+    
+    # Broadcast to officer radios
+    priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
+    dispatch_text = f"Dispatch. Units {', '.join(dispatched)} respond to {call.get('incident_type', 'call')} at {call.get('location', 'unknown')}. Priority {priority_labels.get(call.get('priority', 3), 'MEDIUM')}."
+    alert_message = json.dumps({
+        "type": "dispatch_alert",
+        "call_id": call_id,
+        "incident_type": call.get("incident_type"),
+        "location": call.get("location"),
+        "description": call.get("description"),
+        "priority": call.get("priority"),
+        "dispatch_text": dispatch_text,
+        "timestamp": datetime.now(timezone.utc).timestamp()
+    })
+    for officer_id, ws in list(connected_officer_radios.items()):
+        try:
+            await ws.send_text(alert_message)
+        except Exception:
+            connected_officer_radios.pop(officer_id, None)
+    
+    return {"message": f"Dispatched {len(dispatched)} unit(s)", "units": dispatched}
+
+# ===== SEED UNITS =====
+@api_router.post("/units/seed")
+async def seed_units(current_user: User = Depends(get_current_user)):
+    """Seed default units."""
+    existing = await db.units.count_documents({})
+    if existing > 0:
+        return {"message": f"Units already exist ({existing})", "seeded": 0}
+    
+    default_units = [
+        {"callsign": "ADAM-12", "type": "Police"},
+        {"callsign": "ADAM-14", "type": "Police"},
+        {"callsign": "BOY-7", "type": "Police"},
+        {"callsign": "CHARLES-3", "type": "Police"},
+        {"callsign": "ENGINE-1", "type": "Fire"},
+        {"callsign": "ENGINE-5", "type": "Fire"},
+        {"callsign": "TRUCK-2", "type": "Fire"},
+        {"callsign": "MEDIC-1", "type": "EMS"},
+        {"callsign": "MEDIC-3", "type": "EMS"},
+        {"callsign": "RESCUE-1", "type": "EMS"},
+    ]
+    for u in default_units:
+        u["id"] = str(uuid.uuid4())
+        u["status"] = "Available"
+        u["assigned_officer"] = None
+        u["assigned_officer_name"] = None
+        u["assigned_call_id"] = None
+        u["created_at"] = datetime.now(timezone.utc).isoformat()
+        u["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.units.insert_many(default_units)
+    return {"message": f"Seeded {len(default_units)} units", "seeded": len(default_units)}
 
 # Person Search
 @api_router.get("/search/person")
