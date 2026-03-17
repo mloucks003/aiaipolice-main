@@ -239,11 +239,7 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
     try {
       setRadioState(prev => ({...prev, isPTTPressed: true, isRecording: true}));
       
-      // Play squelch sound first, then start recording
-      // playRadioEffect uses allowsRecordingIOS: true so it won't conflict
-      await audioManager.playRadioEffect('squelch');
-      
-      // Start recording
+      // Start recording immediately — no squelch here (conflicts with iOS audio session)
       await audioManager.startRecording();
       
       // Send start transmission message
@@ -264,6 +260,9 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
       
       // Stop recording and get audio chunks
       const chunks = await audioManager.stopRecording();
+      
+      // Play squelch after recording stops (safe — no recording conflict)
+      audioManager.playRadioEffect('squelch').catch(() => {});
       
       if (chunks.length > 0) {
         // Send audio chunks to server
