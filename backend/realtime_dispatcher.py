@@ -311,9 +311,10 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
     
     async def check_dispatch_conditions(self) -> bool:
         """Check if we should dispatch"""
-        # Dispatch after 6 questions OR if we have location + incident type + at least 4 exchanges
-        should_dispatch = (self.question_count >= 6) or (
-            self.question_count >= 4 and self.has_location and self.has_incident_type
+        # Dispatch if we have location + incident type (even after just 2 exchanges)
+        # OR after 4 exchanges regardless (caller may not give clean info)
+        should_dispatch = (self.question_count >= 4) or (
+            self.question_count >= 2 and self.has_location and self.has_incident_type
         )
         
         if should_dispatch and not self.should_dispatch:
@@ -390,6 +391,47 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 logger.error(f"Call {self.call_sid} - Failed to send dispatch alerts: {e}")
                 logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}")
             
+    async def dispatch_on_call_end(self):
+        """Force dispatch when call ends if we haven't dispatched yet.
+        A 911 call should always generate a call for service."""
+        if self.should_dispatch:
+            logger.info(f"Call {self.call_sid} - Already dispatched, skipping end-of-call dispatch")
+            return
+        
+        if not self.conversation_history:
+            logger.info(f"Call {self.call_sid} - No conversation history, skipping dispatch")
+            return
+        
+        logger.info(f"Call {self.call_sid} - Call ended without dispatch, forcing dispatch now")
+        
+        # Use OpenAI to summarize the call and extract info
+        call = await self.db.active_calls.find_one({"call_sid": self.call_sid})
+        if not call:
+            logger.warning(f"Call {self.call_sid} - No call record found")
+            return
+        
+        incident_type = call.get('incident_type', 'Unknown')
+        location = call.get('location', 'Unknown location')
+        
+        # If we still don't have incident type or location, try to extract from full transcript
+        full_transcript = "\n".join(self.conversation_history)
+        if incident_type == 'Unknown' or location == 'Unknown location':
+            # Set reasonable defaults from whatever we have
+            if not call.get('incident_type'):
+                await self.db.active_calls.update_one(
+                    {"call_sid": self.call_sid},
+                    {"$set": {"incident_type": "911 Call"}}
+                )
+            if not call.get('location'):
+                await self.db.active_calls.update_one(
+                    {"call_sid": self.call_sid},
+                    {"$set": {"location": "Unknown - check transcript"}}
+                )
+        
+        # Force dispatch
+        self.should_dispatch = True
+        await self.initiate_dispatch()
+
     async def run(self, twilio_ws: WebSocket):
         """Main loop - bidirectional audio streaming"""
         try:
@@ -406,6 +448,12 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
             import traceback
             traceback.print_exc()
         finally:
+            # When call ends, force dispatch if it hasn't happened yet
+            try:
+                await self.dispatch_on_call_end()
+            except Exception as e:
+                logger.error(f"Call {self.call_sid} - Error in end-of-call dispatch: {e}")
+            
             if self.openai_ws:
                 try:
                     await self.openai_ws.close()
