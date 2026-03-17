@@ -247,32 +247,58 @@ async def start_recording_async(call_sid: str, host: str):
     except Exception as e:
         logger.error(f"Failed to start recording for call {call_sid}: {e}")
 
+def parse_offender_name(name_str: str) -> tuple:
+    """Parse offender name in 'LAST, FIRST' or 'FIRST LAST' format."""
+    if ',' in name_str:
+        parts = name_str.split(',')
+        last_name = parts[0].strip()
+        first_name = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        parts = name_str.strip().split()
+        if len(parts) >= 2:
+            first_name = parts[0].strip()
+            last_name = ' '.join(parts[1:]).strip()
+        else:
+            first_name = ""
+            last_name = name_str.strip()
+    return first_name, last_name
+
 async def find_or_create_person(citation_data: dict) -> str:
     """Find existing person or create new one from citation data."""
-    # Try to find by driver's license first
     person = None
+    
+    # Try to find by driver's license first (case-insensitive)
     if citation_data.get('offender_dl'):
-        person = await db.persons.find_one({"drivers_license": citation_data['offender_dl']}, {"_id": 0})
+        person = await db.persons.find_one(
+            {"drivers_license": {"$regex": f"^{citation_data['offender_dl']}$", "$options": "i"}},
+            {"_id": 0}
+        )
     
     # Try to find by name and DOB
     if not person and citation_data.get('offender_name') and citation_data.get('offender_dob'):
-        names = citation_data['offender_name'].split(',')
-        last_name = names[0].strip() if names else ""
-        first_name = names[1].strip() if len(names) > 1 else ""
+        first_name, last_name = parse_offender_name(citation_data['offender_name'])
         
-        person = await db.persons.find_one({
-            "last_name": {"$regex": f"^{last_name}$", "$options": "i"},
-            "first_name": {"$regex": f"^{first_name}$", "$options": "i"},
-            "dob": citation_data['offender_dob']
-        }, {"_id": 0})
+        if last_name:
+            person = await db.persons.find_one({
+                "last_name": {"$regex": f"^{last_name}$", "$options": "i"},
+                "first_name": {"$regex": f"^{first_name}$", "$options": "i"},
+                "dob": citation_data['offender_dob']
+            }, {"_id": 0})
+    
+    # Try name-only match (no DOB) as fallback
+    if not person and citation_data.get('offender_name'):
+        first_name, last_name = parse_offender_name(citation_data['offender_name'])
+        if first_name and last_name:
+            person = await db.persons.find_one({
+                "last_name": {"$regex": f"^{last_name}$", "$options": "i"},
+                "first_name": {"$regex": f"^{first_name}$", "$options": "i"},
+            }, {"_id": 0})
     
     if person:
         return person['id']
     
     # Create new person record
-    names = citation_data['offender_name'].split(',')
-    last_name = names[0].strip() if names else citation_data['offender_name']
-    first_name = names[1].strip() if len(names) > 1 else ""
+    first_name, last_name = parse_offender_name(citation_data.get('offender_name', ''))
     
     new_person = PersonRecord(
         first_name=first_name,
@@ -1304,6 +1330,50 @@ async def search_vehicle(
     
     results = await db.vehicles.find(query, {"_id": 0}).to_list(100)
     return results
+
+# Person detail with citations
+@api_router.get("/persons/{person_id}")
+async def get_person_detail(person_id: str, current_user: User = Depends(get_current_user)):
+    """Get person record with full citation details."""
+    person = await db.persons.find_one({"id": person_id}, {"_id": 0})
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    
+    # Fetch actual citation records
+    citation_ids = person.get('citations', [])
+    citations = []
+    if citation_ids:
+        citations = await db.citations.find({"id": {"$in": citation_ids}}, {"_id": 0}).to_list(100)
+    
+    person['citation_records'] = citations
+    return person
+
+# Warrant issuance
+@api_router.post("/persons/{person_id}/warrants")
+async def issue_warrant(person_id: str, warrant_data: dict, current_user: User = Depends(get_current_user)):
+    """Issue a warrant against a person."""
+    person = await db.persons.find_one({"id": person_id}, {"_id": 0})
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    
+    warrant = {
+        "id": str(uuid.uuid4()),
+        "type": warrant_data.get('type', 'Arrest'),
+        "description": warrant_data.get('description', ''),
+        "date": warrant_data.get('date', datetime.now(timezone.utc).strftime('%Y-%m-%d')),
+        "amount": warrant_data.get('amount', 0),
+        "status": "Active",
+        "issuing_officer": current_user.full_name,
+        "badge_number": current_user.badge_number,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.persons.update_one(
+        {"id": person_id},
+        {"$push": {"warrants": warrant}}
+    )
+    
+    return {"message": "Warrant issued", "warrant": warrant}
 
 # Citations with auto-fine and person linking
 @api_router.post("/citations", response_model=Citation)

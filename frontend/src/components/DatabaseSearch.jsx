@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Search, User, Car, UserPlus, Plus } from 'lucide-react';
+import { Search, User, Car, UserPlus, Plus, AlertTriangle, FileText, Shield } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -17,6 +17,10 @@ export default function DatabaseSearch({ token }) {
   const [personForm, setPersonForm] = useState({ first_name: '', last_name: '', middle_name: '', dob: '', drivers_license: '', dl_state: '', address: '', city: '', state: '', zip_code: '', phone: '', race: '', sex: '', height: '', weight: '', eye_color: '', hair_color: '', notes: '' });
   const [vehicleForm, setVehicleForm] = useState({ plate_number: '', state: '', vin: '', make: '', model: '', year: '', color: '', registered_owner: '', insurance_status: 'Active', registration_status: 'Active', notes: '' });
   const [saving, setSaving] = useState(false);
+  const [expandedPerson, setExpandedPerson] = useState(null);
+  const [personDetail, setPersonDetail] = useState(null);
+  const [showWarrantForm, setShowWarrantForm] = useState(false);
+  const [warrantForm, setWarrantForm] = useState({ type: 'Arrest', description: '', amount: 0 });
 
   const handleCreatePerson = async (e) => {
     e.preventDefault();
@@ -85,6 +89,50 @@ export default function DatabaseSearch({ token }) {
       toast.error('Search failed');
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleExpandPerson = async (person) => {
+    if (expandedPerson === person.id) {
+      setExpandedPerson(null);
+      setPersonDetail(null);
+      setShowWarrantForm(false);
+      return;
+    }
+    try {
+      const response = await axios.get(`${API}/persons/${person.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPersonDetail(response.data);
+      setExpandedPerson(person.id);
+      setShowWarrantForm(false);
+    } catch (error) {
+      // Fallback to basic person data
+      setPersonDetail(person);
+      setExpandedPerson(person.id);
+    }
+  };
+
+  const handleIssueWarrant = async (personId) => {
+    setSaving(true);
+    try {
+      await axios.post(`${API}/persons/${personId}/warrants`, warrantForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Warrant issued');
+      setWarrantForm({ type: 'Arrest', description: '', amount: 0 });
+      setShowWarrantForm(false);
+      // Refresh person detail
+      const response = await axios.get(`${API}/persons/${personId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPersonDetail(response.data);
+      // Update results list too
+      setResults(prev => prev.map(p => p.id === personId ? response.data : p));
+    } catch (error) {
+      toast.error('Failed to issue warrant');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -271,11 +319,13 @@ export default function DatabaseSearch({ token }) {
                     <th>ADDRESS</th>
                     <th>WARRANTS</th>
                     <th>PRIORS</th>
+                    <th>CITATIONS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((person, idx) => (
-                    <tr key={idx}>
+                    <>
+                    <tr key={idx} onClick={() => handleExpandPerson(person)} style={{ cursor: 'pointer' }}>
                       <td className="mono-field">{person.last_name}, {person.first_name}</td>
                       <td className="mono-field">{person.dob}</td>
                       <td className="mono-field">{person.drivers_license || 'N/A'}</td>
@@ -286,7 +336,90 @@ export default function DatabaseSearch({ token }) {
                       <td className={person.priors?.length > 0 ? 'status-caution' : ''}>
                         {person.priors?.length || 0}
                       </td>
+                      <td>{person.citations?.length || 0}</td>
                     </tr>
+                    {expandedPerson === person.id && personDetail && (
+                      <tr key={`${idx}-detail`}>
+                        <td colSpan={7} style={{ padding: '12px', background: '#f0f0f0' }}>
+                          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                            {/* Warrants Section */}
+                            <div style={{ flex: '1', minWidth: '250px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                <AlertTriangle className="w-4 h-4" style={{ color: '#c00' }} />
+                                <strong style={{ fontSize: '11px' }}>WARRANTS ({personDetail.warrants?.length || 0})</strong>
+                                <button className="win-button" onClick={(e) => { e.stopPropagation(); setShowWarrantForm(!showWarrantForm); }} style={{ fontSize: '10px', padding: '2px 8px', marginLeft: 'auto' }}>
+                                  <Shield className="w-3 h-3" style={{ display: 'inline', marginRight: '3px' }} />ISSUE WARRANT
+                                </button>
+                              </div>
+                              {personDetail.warrants?.length > 0 ? personDetail.warrants.map((w, wi) => (
+                                <div key={wi} style={{ background: '#fff0f0', border: '1px solid #c00', padding: '6px', marginBottom: '4px', fontSize: '11px' }}>
+                                  <strong>{w.type}</strong> — {w.description || 'No description'}
+                                  <br />
+                                  <span style={{ fontSize: '10px', color: '#666' }}>
+                                    Date: {w.date} | Amount: ${w.amount || 0} | Status: {w.status || 'Active'}
+                                    {w.issuing_officer && ` | Officer: ${w.issuing_officer}`}
+                                  </span>
+                                </div>
+                              )) : <div style={{ fontSize: '11px', color: '#666' }}>No active warrants</div>}
+                              
+                              {showWarrantForm && (
+                                <div style={{ background: '#fff', border: '1px solid #999', padding: '8px', marginTop: '6px' }}>
+                                  <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '6px' }}>NEW WARRANT</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                                    <div>
+                                      <label style={{ fontSize: '10px', display: 'block' }}>TYPE:</label>
+                                      <select className="win-input" value={warrantForm.type} onChange={(e) => setWarrantForm({...warrantForm, type: e.target.value})} style={{ width: '100%' }}>
+                                        <option value="Arrest">Arrest Warrant</option>
+                                        <option value="Bench">Bench Warrant</option>
+                                        <option value="Search">Search Warrant</option>
+                                        <option value="Traffic">Traffic Warrant</option>
+                                        <option value="FTA">Failure to Appear</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label style={{ fontSize: '10px', display: 'block' }}>BAIL AMOUNT ($):</label>
+                                      <input type="number" className="win-input" value={warrantForm.amount} onChange={(e) => setWarrantForm({...warrantForm, amount: parseFloat(e.target.value) || 0})} style={{ width: '100%' }} />
+                                    </div>
+                                    <div style={{ gridColumn: '1 / -1' }}>
+                                      <label style={{ fontSize: '10px', display: 'block' }}>DESCRIPTION:</label>
+                                      <input type="text" className="win-input" value={warrantForm.description} onChange={(e) => setWarrantForm({...warrantForm, description: e.target.value})} style={{ width: '100%' }} placeholder="Warrant description..." />
+                                    </div>
+                                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '6px' }}>
+                                      <button className="win-button btn-primary" onClick={() => handleIssueWarrant(person.id)} disabled={saving} style={{ fontSize: '10px' }}>
+                                        {saving ? 'ISSUING...' : 'CONFIRM WARRANT'}
+                                      </button>
+                                      <button className="win-button" onClick={() => setShowWarrantForm(false)} style={{ fontSize: '10px' }}>CANCEL</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Citations Section */}
+                            <div style={{ flex: '1', minWidth: '250px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                <FileText className="w-4 h-4" />
+                                <strong style={{ fontSize: '11px' }}>CITATIONS ({personDetail.citations?.length || 0})</strong>
+                              </div>
+                              {personDetail.citation_records?.length > 0 ? personDetail.citation_records.map((c, ci) => (
+                                <div key={ci} style={{ background: '#fff', border: '1px solid #ccc', padding: '6px', marginBottom: '4px', fontSize: '11px' }}>
+                                  <strong>{c.violation_code}</strong> — {c.violation_description}
+                                  <br />
+                                  <span style={{ fontSize: '10px', color: '#666' }}>
+                                    {c.id} | {c.location} | Fine: ${c.fine_amount} | {c.status}
+                                  </span>
+                                </div>
+                              )) : personDetail.citations?.length > 0 ? (
+                                <div style={{ fontSize: '11px', color: '#666' }}>{personDetail.citations.length} citation(s) on file</div>
+                              ) : (
+                                <div style={{ fontSize: '11px', color: '#666' }}>No citations</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </>
                   ))}
                 </tbody>
               </table>
