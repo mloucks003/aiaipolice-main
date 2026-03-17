@@ -1565,6 +1565,63 @@ async def recordings_viewer():
     return FileResponse(ROOT_DIR / "recordings_viewer.html")
 
 # WebSocket endpoint for OpenAI Realtime API
+@app.websocket("/ws/officer-radio")
+async def websocket_officer_radio(websocket: WebSocket, token: str):
+    """WebSocket endpoint for Officer Radio App"""
+    # Accept the connection first (required by WebSocket protocol)
+    await websocket.accept()
+    
+    # Then authenticate the connection using JWT token
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            await websocket.close(code=1008, reason="Invalid authentication token")
+            logger.warning("WebSocket connection rejected: Invalid token payload")
+            return
+        
+        # Verify user exists and is active
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        if user is None or not user.get('active', False):
+            await websocket.close(code=1008, reason="User not found or inactive")
+            logger.warning(f"WebSocket connection rejected: User {user_id} not found or inactive")
+            return
+        
+        logger.info(f"Officer {user.get('username')} authenticated for WebSocket connection")
+        
+    except JWTError as e:
+        await websocket.close(code=1008, reason="Authentication failed")
+        logger.warning(f"WebSocket connection rejected: JWT error - {e}")
+        return
+    except Exception as e:
+        await websocket.close(code=1008, reason="Authentication error")
+        logger.error(f"WebSocket authentication error: {e}")
+        return
+    
+    logger.info(f"WebSocket connection established for officer {user.get('username')}")
+    
+    # Create OfficerRadioDispatcher instance and run bidirectional streaming
+    from officer_radio_dispatcher import OfficerRadioDispatcher
+    
+    try:
+        dispatcher = OfficerRadioDispatcher(
+            officer_id=user_id,
+            db=db,
+            websocket=websocket
+        )
+        
+        # Run bidirectional streaming
+        await dispatcher.run()
+            
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for officer {user.get('username')}")
+    except Exception as e:
+        logger.error(f"WebSocket error for officer {user.get('username')}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+
 @app.websocket("/ws/media")
 async def websocket_media_stream(websocket: WebSocket):
     """WebSocket endpoint for Twilio Media Streams + OpenAI Realtime API"""
