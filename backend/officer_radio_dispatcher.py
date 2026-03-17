@@ -130,73 +130,89 @@ class OfficerRadioDispatcher:
     
     def _extract_pcm_from_caf(self, audio_bytes: bytes) -> str:
         """Extract PCM16 data from CAF (Core Audio Format) file.
-        CAF structure: 'caff' header, then chunks with 4-byte type + 8-byte size."""
+        CAF structure: 'caff' (4) + version (2) + flags (2) = 8 byte header,
+        then chunks: type (4) + size (8, big-endian int64) + data."""
         try:
-            # CAF header: 'caff' (4) + version (2) + flags (2) = 8 bytes
-            pos = 8
-            sample_rate = 24000.0
+            pos = 8  # Skip CAF file header
+            sample_rate = 0.0
             channels = 1
-            bits_per_sample = 16
+            bits_per_channel = 0
+            fmt_flags = 0
             data_offset = 0
             data_size = 0
             
             while pos < len(audio_bytes) - 12:
                 chunk_type = audio_bytes[pos:pos+4]
-                chunk_size = struct.unpack_from('>q', audio_bytes, pos + 4)[0]  # CAF uses big-endian 64-bit size
+                chunk_size = struct.unpack_from('>q', audio_bytes, pos + 4)[0]
+                chunk_data_start = pos + 12
+                
+                logger.info(f"CAF chunk: {chunk_type} size={chunk_size} at pos={pos}")
                 
                 if chunk_type == b'desc':
-                    # Audio description chunk
-                    sample_rate = struct.unpack_from('>d', audio_bytes, pos + 12)[0]  # float64 big-endian
-                    fmt_id = audio_bytes[pos+20:pos+24]
-                    fmt_flags = struct.unpack_from('>I', audio_bytes, pos + 24)[0]
-                    bytes_per_packet = struct.unpack_from('>I', audio_bytes, pos + 28)[0]
-                    frames_per_packet = struct.unpack_from('>I', audio_bytes, pos + 32)[0]
-                    channels = struct.unpack_from('>I', audio_bytes, pos + 36)[0]
-                    bits_per_sample = struct.unpack_from('>I', audio_bytes, pos + 40)[0]
-                    logger.info(f"CAF desc: {sample_rate}Hz, {channels}ch, {bits_per_sample}bit, fmt={fmt_id}")
+                    # CAF Audio Description: 
+                    # float64 sampleRate, fourcc formatID, uint32 formatFlags,
+                    # uint32 bytesPerPacket, uint32 framesPerPacket,
+                    # uint32 channelsPerFrame, uint32 bitsPerChannel
+                    sample_rate = struct.unpack_from('>d', audio_bytes, chunk_data_start)[0]
+                    fmt_id = audio_bytes[chunk_data_start+8:chunk_data_start+12]
+                    fmt_flags = struct.unpack_from('>I', audio_bytes, chunk_data_start + 12)[0]
+                    bytes_per_packet = struct.unpack_from('>I', audio_bytes, chunk_data_start + 16)[0]
+                    frames_per_packet = struct.unpack_from('>I', audio_bytes, chunk_data_start + 20)[0]
+                    channels = struct.unpack_from('>I', audio_bytes, chunk_data_start + 24)[0]
+                    bits_per_channel = struct.unpack_from('>I', audio_bytes, chunk_data_start + 28)[0]
+                    logger.info(f"CAF desc: rate={sample_rate}, fmt={fmt_id}, flags={fmt_flags:#x}, "
+                               f"bpp={bytes_per_packet}, fpp={frames_per_packet}, "
+                               f"ch={channels}, bits={bits_per_channel}")
                 
                 elif chunk_type == b'data':
-                    # Data chunk - skip 4-byte edit count
-                    data_offset = pos + 12 + 4  # chunk header (12) + edit count (4)
+                    # Data chunk has a 4-byte edit count before actual audio data
+                    data_offset = chunk_data_start + 4
                     data_size = chunk_size - 4 if chunk_size > 0 else len(audio_bytes) - data_offset
                     break
                 
                 pos += 12 + max(chunk_size, 0)
             
             if data_offset == 0:
-                logger.error("No data chunk found in CAF file")
-                if self._has_ffmpeg():
-                    return self._convert_with_ffmpeg(audio_bytes)
-                raise Exception("Cannot parse CAF file")
+                logger.error("No data chunk found in CAF")
+                raise Exception("No data chunk in CAF file")
             
             pcm_data = audio_bytes[data_offset:data_offset + data_size]
-            logger.info(f"CAF extracted: {len(pcm_data)} bytes PCM, {sample_rate}Hz, {channels}ch, {bits_per_sample}bit")
+            logger.info(f"CAF raw data: {len(pcm_data)} bytes")
             
-            # CAF with lpcm stores data in big-endian by default on iOS
-            # We need little-endian for OpenAI
-            if bits_per_sample == 16:
-                # Swap byte order from big-endian to little-endian
+            # Determine actual bit depth - if bitsPerChannel is 0, infer from bytesPerPacket
+            if bits_per_channel == 0:
+                # We configured iOS to record 16-bit, so assume 16
+                bits_per_channel = 16
+                logger.info("CAF bitsPerChannel=0, assuming 16-bit based on recording config")
+            
+            # Check if data is big-endian (CAF lpcm flag bit 1 = big-endian)
+            # kCAFLinearPCMFormatFlagIsFloat = 0x1, kCAFLinearPCMFormatFlagIsLittleEndian = 0x2
+            is_little_endian = (fmt_flags & 0x2) != 0
+            logger.info(f"CAF endianness: {'little' if is_little_endian else 'big'}-endian (flags={fmt_flags:#x})")
+            
+            # Swap to little-endian if needed (OpenAI expects LE)
+            if not is_little_endian and bits_per_channel == 16:
+                logger.info("Swapping CAF audio from big-endian to little-endian")
                 pcm_array = bytearray(pcm_data)
                 for i in range(0, len(pcm_array) - 1, 2):
                     pcm_array[i], pcm_array[i+1] = pcm_array[i+1], pcm_array[i]
                 pcm_data = bytes(pcm_array)
             
-            # If correct sample rate and mono, send directly
-            if abs(sample_rate - 24000) < 1 and channels == 1 and bits_per_sample == 16:
-                logger.info(f"CAF already correct format, sending {len(pcm_data)} bytes")
+            # Check if we need resampling
+            if abs(sample_rate - 24000) < 1 and channels == 1:
+                logger.info(f"CAF format matches target, sending {len(pcm_data)} bytes PCM16")
                 return base64.b64encode(pcm_data).decode('utf-8')
             
             # Need resampling
-            if self._has_ffmpeg():
-                return self._convert_with_ffmpeg(audio_bytes)
-            
-            return self._resample_pcm(pcm_data, int(sample_rate), channels, bits_per_sample)
+            logger.info(f"CAF needs resampling: {sample_rate}Hz/{channels}ch -> 24000Hz/1ch")
+            return self._resample_pcm(pcm_data, int(sample_rate), channels, bits_per_channel)
             
         except Exception as e:
             logger.error(f"CAF parsing error: {e}")
-            if self._has_ffmpeg():
-                return self._convert_with_ffmpeg(audio_bytes)
-            raise
+            # Last resort: skip first 4096 bytes (typical CAF header area) and treat rest as PCM
+            logger.warning("Attempting raw PCM extraction from CAF as fallback")
+            pcm_data = audio_bytes[4096:]
+            return base64.b64encode(pcm_data).decode('utf-8')
     
     def _resample_pcm(self, pcm_data: bytes, src_rate: int, channels: int, bits: int) -> str:
         """Pure Python PCM resampling to 24kHz mono 16-bit."""
