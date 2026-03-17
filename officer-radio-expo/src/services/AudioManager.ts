@@ -164,6 +164,7 @@ class AudioManager {
 
   /**
    * Flush buffered PCM16 chunks into a WAV file and play it
+   * Applies radio distortion effect for realism
    */
   async playBufferedAudio(): Promise<void> {
     if (this.audioBuffer.length === 0) {
@@ -176,16 +177,19 @@ class AudioManager {
       const combinedBase64 = this.audioBuffer.join('');
       this.audioBuffer = [];
 
-      // Decode base64 to get raw PCM bytes length
+      // Decode base64 to get raw PCM bytes
       const pcmBytes = this.base64ToBytes(combinedBase64);
       
+      // Apply radio distortion to the PCM data
+      const distortedPcm = this.applyRadioDistortion(pcmBytes);
+      
       // Create WAV header for PCM16, 24kHz, mono
-      const wavHeader = this.createWavHeader(pcmBytes.length, 24000, 1, 16);
+      const wavHeader = this.createWavHeader(distortedPcm.length, 24000, 1, 16);
       
       // Combine header + PCM data
-      const wavBytes = new Uint8Array(wavHeader.length + pcmBytes.length);
+      const wavBytes = new Uint8Array(wavHeader.length + distortedPcm.length);
       wavBytes.set(wavHeader, 0);
-      wavBytes.set(pcmBytes, wavHeader.length);
+      wavBytes.set(distortedPcm, wavHeader.length);
       
       // Convert to base64
       const wavBase64 = this.bytesToBase64(wavBytes);
@@ -420,6 +424,80 @@ class AudioManager {
    */
   getIsPlaying(): boolean {
     return this.isPlaying;
+  }
+
+  // --- Radio distortion effect ---
+
+  /**
+   * Apply radio-style distortion to PCM16 audio data.
+   * Simulates a police radio: bandpass filter (300-3000Hz), slight compression,
+   * subtle noise floor, and mild clipping.
+   */
+  private applyRadioDistortion(pcmBytes: Uint8Array): Uint8Array {
+    const sampleRate = 24000;
+    const numSamples = pcmBytes.length / 2;
+    const samples = new Int16Array(numSamples);
+    
+    // Read PCM16 LE samples
+    for (let i = 0; i < numSamples; i++) {
+      samples[i] = pcmBytes[i * 2] | (pcmBytes[i * 2 + 1] << 8);
+      // Sign extend
+      if (samples[i] > 32767) samples[i] -= 65536;
+    }
+    
+    // Simple IIR bandpass filter coefficients (300Hz - 3000Hz at 24kHz)
+    // High-pass at ~300Hz
+    const hpAlpha = 0.96; // ~300Hz cutoff
+    // Low-pass at ~3000Hz  
+    const lpAlpha = 0.55; // ~3000Hz cutoff
+    
+    let hpPrev = 0;
+    let hpPrevIn = 0;
+    let lpPrev = 0;
+    
+    const output = new Int16Array(numSamples);
+    
+    for (let i = 0; i < numSamples; i++) {
+      const sample = samples[i] / 32768.0;
+      
+      // High-pass filter (remove bass)
+      const hpOut = hpAlpha * (hpPrev + sample - hpPrevIn);
+      hpPrevIn = sample;
+      hpPrev = hpOut;
+      
+      // Low-pass filter (remove treble)
+      lpPrev = lpPrev + lpAlpha * (hpOut - lpPrev);
+      
+      let filtered = lpPrev;
+      
+      // Soft clipping / compression (radio compressor effect)
+      if (filtered > 0.4) {
+        filtered = 0.4 + (filtered - 0.4) * 0.3;
+      } else if (filtered < -0.4) {
+        filtered = -0.4 + (filtered + 0.4) * 0.3;
+      }
+      
+      // Add subtle noise floor
+      const noise = (Math.random() * 2 - 1) * 0.008;
+      filtered += noise;
+      
+      // Boost volume slightly to compensate for filtering
+      filtered *= 1.8;
+      
+      // Hard clip
+      filtered = Math.max(-0.95, Math.min(0.95, filtered));
+      
+      output[i] = Math.round(filtered * 32767);
+    }
+    
+    // Convert back to Uint8Array (LE)
+    const result = new Uint8Array(numSamples * 2);
+    for (let i = 0; i < numSamples; i++) {
+      result[i * 2] = output[i] & 0xFF;
+      result[i * 2 + 1] = (output[i] >> 8) & 0xFF;
+    }
+    
+    return result;
   }
 
   // --- Helper methods for WAV creation ---
