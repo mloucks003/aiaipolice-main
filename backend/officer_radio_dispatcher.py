@@ -48,6 +48,18 @@ OFFICER_RADIO_FUNCTIONS = [
             },
             "required": ["plate_number"]
         }
+    },
+    {
+        "type": "function",
+        "name": "get_active_calls",
+        "description": "Get current active 911 calls and incidents. Returns all calls with their status, incident type, location, priority, and description.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "Filter by status: Active, Dispatched, Closed, or all. Default is active calls only.", "enum": ["Active", "Dispatched", "Closed", "all"]},
+                "priority": {"type": "integer", "description": "Filter by priority level 1-5 (1=Critical, 5=Low). Omit for all priorities."}
+            }
+        }
     }
 ]
 
@@ -325,6 +337,7 @@ YOUR CAPABILITIES:
 You can search for:
 1. Person records (by name, driver's license, or date of birth)
 2. Vehicle records (by license plate number and state)
+3. Active 911 calls and incidents (current calls, dispatched units, priorities)
 
 CONVERSATION FLOW:
 1. Listen to the officer's request
@@ -336,6 +349,7 @@ CONVERSATION FLOW:
 RESPONSE STYLE:
 - Keep responses brief and to the point (10-20 words typically)
 - For search results, state key information: name, DOB, warrants, vehicle details
+- For active calls, state incident type, location, priority, and status
 - If no results found, say so clearly
 - If you need more information, ask specific questions
 
@@ -348,9 +362,13 @@ Officer: "Search for John Smith, DOB 1985-03-15"
 You: "Searching for John Smith" [call search_person]
 Then: "John Smith, DOB March 15, 1985, one active warrant for failure to appear"
 
-Officer: "Check license DL12345678"
-You: "Checking driver's license" [call search_person]
-Then: "Jane Doe, DOB June 10, 1990, no warrants, two priors"
+Officer: "What calls do we have right now?"
+You: [call get_active_calls]
+Then: "We have 3 active calls. Priority 1 domestic disturbance at 123 Main Street, priority 2 traffic accident on Highway 65, and a priority 3 noise complaint on Oak Avenue"
+
+Officer: "Any high priority calls?"
+You: [call get_active_calls with priority filter]
+Then: "One priority 1 call — armed robbery in progress at the Gas N Go on 5th Street, no units assigned yet"
 
 Keep it professional and efficient.""",
                     "voice": "alloy",
@@ -597,6 +615,8 @@ Keep it professional and efficient.""",
                 return await self.search_person(arguments)
             elif function_name == "search_vehicle":
                 return await self.search_vehicle(arguments)
+            elif function_name == "get_active_calls":
+                return await self.get_active_calls(arguments)
             else:
                 return {"error": f"Unknown function: {function_name}"}
         except Exception as e:
@@ -653,6 +673,46 @@ Keep it professional and efficient.""",
             
         except Exception as e:
             logger.error(f"Error in search_vehicle: {e}")
+            return {"error": f"Database query failed: {str(e)}"}
+    
+    async def get_active_calls(self, params: dict):
+        """Get current active calls/incidents"""
+        try:
+            query = {}
+            status = params.get('status', 'Active')
+            if status and status != 'all':
+                query["status"] = status
+            
+            priority = params.get('priority')
+            if priority:
+                query["priority"] = priority
+            
+            calls = await self.db.active_calls.find(
+                query, 
+                {"_id": 0, "transcription": 0}  # Exclude large transcription field
+            ).sort("created_at", -1).to_list(20)
+            
+            if not calls:
+                return {"found": False, "message": "No active calls", "count": 0}
+            
+            # Summarize each call for the dispatcher
+            summaries = []
+            for call in calls:
+                summaries.append({
+                    "incident_type": call.get("incident_type", "Unknown"),
+                    "location": call.get("location", "Unknown"),
+                    "description": call.get("description", ""),
+                    "priority": call.get("priority", 3),
+                    "status": call.get("status", "Active"),
+                    "caller_phone": call.get("caller_phone", "Unknown"),
+                    "assigned_officer": call.get("assigned_officer"),
+                    "created_at": call.get("created_at", ""),
+                })
+            
+            return {"found": True, "calls": summaries, "count": len(summaries)}
+            
+        except Exception as e:
+            logger.error(f"Error in get_active_calls: {e}")
             return {"error": f"Database query failed: {str(e)}"}
     
     async def run(self):
