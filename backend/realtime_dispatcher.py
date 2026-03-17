@@ -323,7 +323,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
         return False
     
     async def initiate_dispatch(self):
-        """Initiate dispatch sequence"""
+        """Initiate dispatch sequence and alert connected officer radios"""
         logger.info(f"Call {self.call_sid} - Initiating dispatch")
         
         # Get call details for dispatch message
@@ -332,6 +332,9 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
         if call:
             incident_type = call.get('incident_type', 'Unknown incident')
             location = call.get('location', 'Unknown location')
+            description = call.get('description', '')
+            priority = call.get('priority', 2)
+            call_id = call.get('id', self.call_sid)
             
             # Update call status to Active
             await self.db.active_calls.update_one(
@@ -342,7 +345,50 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 }}
             )
             
-            logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}")
+            # Send dispatch alert to connected officer radios (same as CAD manual creation)
+            try:
+                from server import connected_officer_radios
+                
+                priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
+                dispatch_text = f"Dispatch alert. Priority {priority_labels.get(priority, 'HIGH')}. {incident_type} at {location}."
+                if description:
+                    dispatch_text += f" {description}."
+                if priority <= 2:
+                    dispatch_text += " All available units respond."
+                else:
+                    dispatch_text += " One unit respond."
+                
+                alert_message = json.dumps({
+                    "type": "dispatch_alert",
+                    "call_id": call_id,
+                    "incident_type": incident_type,
+                    "location": location,
+                    "description": description,
+                    "priority": priority,
+                    "dispatch_text": dispatch_text,
+                    "timestamp": datetime.now(timezone.utc).timestamp()
+                })
+                
+                disconnected = []
+                officers_notified = 0
+                for officer_id, ws in connected_officer_radios.items():
+                    try:
+                        await ws.send_text(alert_message)
+                        logger.info(f"Call {self.call_sid} - Dispatch alert sent to officer {officer_id}")
+                        officers_notified += 1
+                        if priority > 2:
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to send dispatch alert to officer {officer_id}: {e}")
+                        disconnected.append(officer_id)
+                
+                for officer_id in disconnected:
+                    connected_officer_radios.pop(officer_id, None)
+                
+                logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}, {officers_notified} officers notified")
+            except Exception as e:
+                logger.error(f"Call {self.call_sid} - Failed to send dispatch alerts: {e}")
+                logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}")
             
     async def run(self, twilio_ws: WebSocket):
         """Main loop - bidirectional audio streaming"""
