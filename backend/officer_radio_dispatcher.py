@@ -441,7 +441,7 @@ CRITICAL RULES:
                     "tools": OFFICER_RADIO_FUNCTIONS,
                     "tool_choice": "auto",
                     "temperature": 0.6,
-                    "max_response_output_tokens": 200
+                    "max_response_output_tokens": 500
                 }
             }
             

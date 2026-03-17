@@ -530,7 +530,7 @@ Example responses:
                 {"role": "user", "content": ai_prompt}
             ],
             temperature=0.5,  # More natural variation
-            max_tokens=150
+            max_tokens=300
         )
         ai_response = ai_response_obj.choices[0].message.content
         
