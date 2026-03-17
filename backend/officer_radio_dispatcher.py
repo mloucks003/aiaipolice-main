@@ -359,16 +359,11 @@ Keep it professional and efficient.""",
                     "input_audio_transcription": {
                         "model": "whisper-1"
                     },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 700
-                    },
+                    "turn_detection": None,
                     "tools": OFFICER_RADIO_FUNCTIONS,
                     "tool_choice": "auto",
                     "temperature": 0.7,
-                    "max_response_output_tokens": 150
+                    "max_response_output_tokens": 500
                 }
             }
             
@@ -383,12 +378,20 @@ Keep it professional and efficient.""",
         """Handle incoming audio from mobile app and forward to OpenAI"""
         try:
             while True:
-                message = await self.mobile_ws.receive_text()
-                data = json.loads(message)
+                try:
+                    message = await self.mobile_ws.receive_text()
+                    data = json.loads(message)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Invalid JSON from mobile: {e}")
+                    continue
                 
                 message_type = data.get('type')
                 
-                if message_type == 'audio_stream':
+                if message_type == 'ping':
+                    # Respond to keepalive pings
+                    continue
+                
+                elif message_type == 'audio_stream':
                     # Convert audio to PCM16 before sending to OpenAI
                     try:
                         pcm16_audio = self.convert_audio_to_pcm16(data['audio'])
@@ -411,11 +414,23 @@ Keep it professional and efficient.""",
                     
                 elif message_type == 'end_transmission':
                     logger.info(f"Officer {self.officer_id} ended transmission")
-                    # Optionally commit the audio buffer
-                    # await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+                    if self.openai_ws:
+                        # Commit the audio buffer so OpenAI processes it
+                        await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+                        logger.info(f"Officer {self.officer_id} - audio buffer committed")
+                        
+                        # Explicitly request a response (don't rely solely on VAD for PTT model)
+                        await self.openai_ws.send(json.dumps({"type": "response.create"}))
+                        logger.info(f"Officer {self.officer_id} - response.create sent")
                     
                 elif message_type == 'start_transmission':
                     logger.info(f"Officer {self.officer_id} started transmission")
+                    # Clear any pending audio buffer for a fresh transmission
+                    if self.openai_ws:
+                        try:
+                            await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
+                        except Exception:
+                            pass
                     
         except Exception as e:
             logger.error(f"Error handling mobile audio for officer {self.officer_id}: {e}")
@@ -544,6 +559,13 @@ Keep it professional and efficient.""",
                 elif event_type == 'error':
                     error_msg = data.get('error', {})
                     logger.error(f"OpenAI error for officer {self.officer_id}: {error_msg}")
+                    
+                    # Don't forward rate_limit or cancellation errors to mobile — they're transient
+                    error_code = error_msg.get('code', '') if isinstance(error_msg, dict) else ''
+                    if error_code in ('rate_limit_exceeded', 'response_already_in_progress'):
+                        logger.warning(f"Transient OpenAI error (ignoring): {error_code}")
+                        continue
+                    
                     # Send error to mobile app
                     error_message = {
                         "type": "error",
@@ -552,6 +574,14 @@ Keep it professional and efficient.""",
                         "timestamp": datetime.now(timezone.utc).timestamp()
                     }
                     await self.mobile_ws.send_text(json.dumps(error_message))
+                
+                elif event_type == 'response.done':
+                    # Full response cycle complete — log status
+                    status = data.get('response', {}).get('status', 'unknown')
+                    logger.info(f"Officer {self.officer_id} - Response done, status: {status}")
+                    if status == 'failed':
+                        status_details = data.get('response', {}).get('status_details', {})
+                        logger.error(f"Response failed: {status_details}")
                     
         except websockets.exceptions.ConnectionClosed:
             logger.warning(f"OpenAI connection closed for officer {self.officer_id}")
