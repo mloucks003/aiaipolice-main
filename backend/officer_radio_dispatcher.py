@@ -70,10 +70,14 @@ class OfficerRadioDispatcher:
         """
         try:
             audio_bytes = base64.b64decode(base64_audio)
-            logger.info(f"Received audio: {len(audio_bytes)} bytes")
+            logger.info(f"Received audio: {len(audio_bytes)} bytes, first 12 bytes: {audio_bytes[:12].hex() if len(audio_bytes) >= 12 else 'too short'}")
             
             # Check if it's a WAV file (starts with RIFF header)
-            if len(audio_bytes) > 44 and audio_bytes[:4] == b'RIFF' and audio_bytes[8:12] == b'WAVE':
+            is_riff = len(audio_bytes) > 44 and audio_bytes[:4] == b'RIFF'
+            is_wave = len(audio_bytes) > 44 and audio_bytes[8:12] == b'WAVE'
+            logger.info(f"WAV detection: RIFF={is_riff}, WAVE={is_wave}, size_ok={len(audio_bytes) > 44}")
+            
+            if is_riff and is_wave:
                 return self._convert_wav_to_pcm16(audio_bytes)
             
             # Not WAV - try ffmpeg for M4A/other formats
