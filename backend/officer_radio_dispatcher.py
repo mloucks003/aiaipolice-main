@@ -725,7 +725,7 @@ Keep it professional and efficient.""",
             if params.get('dob'):
                 query["dob"] = params['dob']
             if params.get('drivers_license'):
-                query["drivers_license"] = params['drivers_license']
+                query["drivers_license"] = {"$regex": params['drivers_license'], "$options": "i"}
             
             if not query:
                 return {"error": "No search parameters provided"}
@@ -734,6 +734,18 @@ Keep it professional and efficient.""",
             
             if not results:
                 return {"found": False, "message": "No records found"}
+            
+            # Enrich results with full citation details
+            for person in results:
+                citation_ids = person.get('citations', [])
+                if citation_ids:
+                    citations = await self.db.citations.find(
+                        {"id": {"$in": citation_ids}},
+                        {"_id": 0, "violation_code": 1, "violation_description": 1, "date_time": 1, "location": 1, "fine_amount": 1, "status": 1, "id": 1}
+                    ).to_list(50)
+                    person['citation_details'] = citations
+                else:
+                    person['citation_details'] = []
             
             return {"found": True, "results": results, "count": len(results)}
             
