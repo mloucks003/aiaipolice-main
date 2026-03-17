@@ -19,11 +19,12 @@ OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 class RealtimeDispatcher:
     """Handles real-time voice conversation between caller and OpenAI"""
     
-    def __init__(self, call_sid: str, db, stream_sid: str):
+    def __init__(self, call_sid: str, db, stream_sid: str, officer_radios: dict = None):
         self.call_sid = call_sid
         self.db = db
         self.openai_ws = None
         self.stream_sid = stream_sid  # Set immediately from constructor
+        self.officer_radios = officer_radios or {}  # Reference to connected officer radio WebSockets
         self.conversation_history = []
         self.question_count = 0
         self.has_location = False
@@ -346,9 +347,10 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 }}
             )
             
-            # Send dispatch alert to connected officer radios (same as CAD manual creation)
+            # Send dispatch alert to connected officer radios
             try:
-                from server import connected_officer_radios
+                officer_radios = self.officer_radios
+                logger.info(f"Call {self.call_sid} - Officer radios available: {len(officer_radios)} officers online")
                 
                 priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
                 dispatch_text = f"Dispatch alert. Priority {priority_labels.get(priority, 'HIGH')}. {incident_type} at {location}."
@@ -372,7 +374,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 
                 disconnected = []
                 officers_notified = 0
-                for officer_id, ws in connected_officer_radios.items():
+                for officer_id, ws in officer_radios.items():
                     try:
                         await ws.send_text(alert_message)
                         logger.info(f"Call {self.call_sid} - Dispatch alert sent to officer {officer_id}")
@@ -384,7 +386,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                         disconnected.append(officer_id)
                 
                 for officer_id in disconnected:
-                    connected_officer_radios.pop(officer_id, None)
+                    officer_radios.pop(officer_id, None)
                 
                 logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}, {officers_notified} officers notified")
             except Exception as e:
@@ -437,11 +439,23 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
         try:
             await self.connect_to_openai()
             
-            # Run both handlers concurrently
-            await asyncio.gather(
-                self.handle_twilio_audio(twilio_ws),
-                self.handle_openai_responses(twilio_ws)
+            # Run both handlers as tasks so we can cancel when one finishes
+            twilio_task = asyncio.create_task(self.handle_twilio_audio(twilio_ws))
+            openai_task = asyncio.create_task(self.handle_openai_responses(twilio_ws))
+            
+            # Wait for either task to finish (usually twilio_task finishes first when call ends)
+            done, pending = await asyncio.wait(
+                [twilio_task, openai_task],
+                return_when=asyncio.FIRST_COMPLETED
             )
+            
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             
         except Exception as e:
             logger.error(f"Error in realtime dispatcher for call {self.call_sid}: {e}")

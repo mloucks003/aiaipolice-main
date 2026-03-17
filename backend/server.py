@@ -1812,8 +1812,8 @@ async def websocket_media_stream(websocket: WebSocket):
                 stream_sid = data['start']['streamSid']
                 logger.info(f"Media stream started for call {call_sid}, stream {stream_sid}")
                 
-                # Create realtime dispatcher with stream_sid
-                dispatcher = RealtimeDispatcher(call_sid, db, stream_sid)
+                # Create realtime dispatcher with stream_sid and officer radios reference
+                dispatcher = RealtimeDispatcher(call_sid, db, stream_sid, connected_officer_radios)
                 
                 # Run the bidirectional audio streaming
                 await dispatcher.run(websocket)
