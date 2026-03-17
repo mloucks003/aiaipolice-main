@@ -390,7 +390,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 
                 disconnected = []
                 officers_notified = 0
-                for officer_id, ws in officer_radios.items():
+                for officer_id, ws in list(officer_radios.items()):
                     try:
                         await ws.send_text(alert_message)
                         logger.info(f"Call {self.call_sid} - Dispatch alert sent to officer {officer_id}")
@@ -403,6 +403,22 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 
                 for officer_id in disconnected:
                     officer_radios.pop(officer_id, None)
+                
+                # If no officers were notified but some were online, retry after a short delay
+                # (officer may be reconnecting after Heroku timeout)
+                if officers_notified == 0 and len(disconnected) > 0:
+                    logger.info(f"Call {self.call_sid} - No officers reached, retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    for officer_id, ws in list(officer_radios.items()):
+                        try:
+                            await ws.send_text(alert_message)
+                            logger.info(f"Call {self.call_sid} - RETRY: Dispatch alert sent to officer {officer_id}")
+                            officers_notified += 1
+                            if priority > 2:
+                                break
+                        except Exception as e:
+                            logger.warning(f"RETRY: Failed to send dispatch alert to officer {officer_id}: {e}")
+                            officer_radios.pop(officer_id, None)
                 
                 logger.info(f"Call {self.call_sid} - Dispatch completed: {incident_type} at {location}, {officers_notified} officers notified")
             except Exception as e:

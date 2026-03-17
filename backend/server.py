@@ -1782,9 +1782,12 @@ async def websocket_officer_radio(websocket: WebSocket, token: str):
         import traceback
         traceback.print_exc()
     finally:
-        # Unregister on disconnect
-        connected_officer_radios.pop(user_id, None)
-        logger.info(f"Officer {user.get('username')} unregistered from dispatch alerts ({len(connected_officer_radios)} officers online)")
+        # Unregister on disconnect — only if this is still OUR websocket (avoid race with reconnect)
+        if connected_officer_radios.get(user_id) is websocket:
+            connected_officer_radios.pop(user_id, None)
+            logger.info(f"Officer {user.get('username')} unregistered from dispatch alerts ({len(connected_officer_radios)} officers online)")
+        else:
+            logger.info(f"Officer {user.get('username')} disconnected but newer connection exists, not removing from dispatch alerts")
 
 
 
