@@ -255,11 +255,8 @@ class AudioManager {
   }
 
   /**
-   * Play a radio sound effect (placeholder for MVP)
+   * Play a radio sound effect — generates tones programmatically
    */
-  /**
-     * Play a radio sound effect — generates tones programmatically
-     */
     async playRadioEffect(effect: 'squelch' | 'beep' | 'dispatch_tone' | 'priority_tone'): Promise<void> {
       try {
         console.log(`Radio effect: ${effect}`);
