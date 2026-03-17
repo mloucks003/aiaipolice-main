@@ -82,6 +82,18 @@ OFFICER_RADIO_FUNCTIONS = [
                 "call_id": {"type": "string", "description": "The call ID. If not provided, uses the officer's currently assigned call."}
             }
         }
+    },
+    {
+        "type": "function",
+        "name": "clear_call",
+        "description": "Officer clears/closes a call. Use when the officer says 'clear the call', 'I'm clear', 'call is clear', 'close the call', or similar. Marks the call as Closed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "call_id": {"type": "string", "description": "The call ID to clear. If not provided, clears the officer's current assigned call."},
+                "disposition": {"type": "string", "description": "How the call was resolved. E.g. 'report taken', 'arrest made', 'unfounded', 'gone on arrival', 'warning issued', 'citation issued'."}
+            }
+        }
     }
 ]
 
@@ -402,9 +414,14 @@ Officer: "I'm on scene" or "I've arrived"
 You: [MUST call arrive_on_scene function first, then respond]
 Then: "Copy, marked on scene at Gas N Go on 5th Street"
 
+Officer: "I'm clear" or "Clear the call" or "Call is clear"
+You: [MUST call clear_call function first, then respond]
+Then: "Copy, call cleared at Gas N Go on 5th Street"
+
 CRITICAL RULES:
 - When an officer says they'll take/respond to a call, you MUST call the acknowledge_call function. Do NOT just verbally acknowledge — the database must be updated.
 - When an officer says they're on scene/arrived, you MUST call the arrive_on_scene function. Do NOT just verbally confirm — the database must be updated.
+- When an officer says they're clear/done/closing a call, you MUST call the clear_call function. Do NOT just verbally confirm — the database must be updated.
 - Always call the function FIRST, then give a verbal response based on the result.
 - Never skip a function call when the officer's intent matches one of your tools.
 
@@ -688,6 +705,8 @@ Keep it professional and efficient.""",
                 return await self.acknowledge_call(arguments)
             elif function_name == "arrive_on_scene":
                 return await self.arrive_on_scene(arguments)
+            elif function_name == "clear_call":
+                return await self.clear_call(arguments)
             else:
                 return {"error": f"Unknown function: {function_name}"}
         except Exception as e:
@@ -865,6 +884,49 @@ Keep it professional and efficient.""",
         except Exception as e:
             logger.error(f"Error in arrive_on_scene: {e}")
             return {"error": f"Failed to mark on scene: {str(e)}"}
+
+    async def clear_call(self, params: dict):
+        """Officer clears/closes a call"""
+        try:
+            call_id = params.get('call_id')
+            disposition = params.get('disposition', 'cleared')
+
+            if call_id:
+                call = await self.db.active_calls.find_one({"id": call_id, "assigned_officer": self.officer_id}, {"_id": 0})
+            else:
+                # Find officer's current call (On Scene or Dispatched)
+                call = await self.db.active_calls.find_one(
+                    {"assigned_officer": self.officer_id, "status": {"$in": ["On Scene", "Dispatched"]}},
+                    {"_id": 0},
+                    sort=[("updated_at", -1)]
+                )
+
+            if not call:
+                return {"success": False, "message": "No active call found assigned to you"}
+
+            await self.db.active_calls.update_one(
+                {"id": call['id']},
+                {"$set": {
+                    "status": "Closed",
+                    "disposition": disposition,
+                    "closed_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+
+            return {
+                "success": True,
+                "message": f"Call cleared — {call.get('incident_type', 'call')} at {call.get('location', 'location')}, disposition: {disposition}",
+                "call_id": call['id'],
+                "incident_type": call.get('incident_type'),
+                "location": call.get('location'),
+                "disposition": disposition
+            }
+
+        except Exception as e:
+            logger.error(f"Error in clear_call: {e}")
+            return {"error": f"Failed to clear call: {str(e)}"}
+
     
     async def run(self):
         """Main loop - bidirectional audio streaming"""
