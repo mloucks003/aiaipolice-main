@@ -309,6 +309,15 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                     {"$set": {"incident_type": incident_type}}
                 )
                 break
+        
+        # Always update description with latest caller statements for CAD display
+        caller_statements = [h.replace("Caller: ", "") for h in self.conversation_history if h.startswith("Caller: ")]
+        if caller_statements:
+            description = " | ".join(caller_statements[-3:])  # Last 3 caller statements
+            await self.db.active_calls.update_one(
+                {"call_sid": self.call_sid},
+                {"$set": {"description": description}}
+            )
     
     async def check_dispatch_conditions(self) -> bool:
         """Check if we should dispatch"""
@@ -353,8 +362,15 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                 logger.info(f"Call {self.call_sid} - Officer radios available: {len(officer_radios)} officers online")
                 
                 priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
+                
+                # Build a detailed dispatch text from caller statements
+                caller_statements = [h.replace("Caller: ", "") for h in self.conversation_history if h.startswith("Caller: ")]
+                caller_summary = ". ".join(caller_statements[:3]) if caller_statements else ""
+                
                 dispatch_text = f"Dispatch alert. Priority {priority_labels.get(priority, 'HIGH')}. {incident_type} at {location}."
-                if description:
+                if caller_summary:
+                    dispatch_text += f" Caller reports: {caller_summary}."
+                elif description:
                     dispatch_text += f" {description}."
                 if priority <= 2:
                     dispatch_text += " All available units respond."

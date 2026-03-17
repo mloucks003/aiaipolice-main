@@ -348,6 +348,13 @@ export default function ActiveCalls({ token, user }) {
                   </div>
                 )}
                 
+                {!call.description && call.transcription && (
+                  <div style={{ fontSize: '11px', marginTop: '4px', padding: '8px', background: '#0d1117', border: '1px solid #2d3748', borderRadius: '4px', color: '#d1d5db' }}>
+                    <span style={{ color: '#6b7280', fontSize: '10px' }}>TRANSCRIPT: </span>
+                    {call.transcription.split('\n').slice(-4).join(' | ')}
+                  </div>
+                )}
+                
                 {call.assigned_officer && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
                     <User className="w-4 h-4" />
