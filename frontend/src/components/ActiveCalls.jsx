@@ -10,6 +10,14 @@ export default function ActiveCalls({ token, user }) {
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [showCreateCall, setShowCreateCall] = useState(false);
+  const [callForm, setCallForm] = useState({
+    incident_type: 'Other',
+    location: '',
+    description: '',
+    caller_phone: '',
+    priority: 3
+  });
   const audioContextRef = useRef(null);
 
   useEffect(() => {
@@ -181,6 +189,24 @@ export default function ActiveCalls({ token, user }) {
     }
   };
 
+  const handleCreateCall = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await axios.post(`${API}/calls/create`, callForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Call created');
+      setCallForm({ incident_type: 'Other', location: '', description: '', caller_phone: '', priority: 3 });
+      setShowCreateCall(false);
+      fetchActiveCalls();
+    } catch (error) {
+      toast.error('Failed to create call');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getPriorityClass = (priority) => {
     if (priority === 1) return 'badge badge-critical';
     if (priority === 2) return 'badge badge-high';
@@ -199,11 +225,14 @@ export default function ActiveCalls({ token, user }) {
     return labels[priority] || 'MEDIUM';
   };
 
-  if (calls.length === 0) {
+  if (calls.length === 0 && !showCreateCall) {
     return (
       <div style={{ padding: '20px', textAlign: 'center' }}>
         <AlertCircle className="w-12 h-12" style={{ margin: '0 auto 10px', opacity: 0.5 }} />
-        <p style={{ fontSize: '11px', opacity: 0.7 }}>NO ACTIVE EMERGENCY CALLS</p>
+        <p style={{ fontSize: '11px', opacity: 0.7, marginBottom: '12px' }}>NO ACTIVE EMERGENCY CALLS</p>
+        <button className="win-button btn-primary" onClick={() => setShowCreateCall(true)} style={{ padding: '6px 16px' }}>
+          + NEW CALL
+        </button>
       </div>
     );
   }
@@ -215,6 +244,13 @@ export default function ActiveCalls({ token, user }) {
           ACTIVE EMERGENCY CALLS: {calls.length}
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className="win-button btn-primary"
+            onClick={() => setShowCreateCall(!showCreateCall)}
+            style={{ padding: '4px 12px', fontSize: '12px' }}
+          >
+            + NEW CALL
+          </button>
           <button 
             className="win-button btn-primary"
             onClick={() => {
@@ -256,6 +292,57 @@ export default function ActiveCalls({ token, user }) {
           )}
         </div>
       </div>
+
+      {showCreateCall && (
+        <div className="field-group" style={{ marginBottom: '12px' }}>
+          <legend>CREATE NEW CALL</legend>
+          <form onSubmit={handleCreateCall} style={{ padding: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div>
+              <label style={{ fontSize: '11px', display: 'block', marginBottom: '2px' }}>INCIDENT TYPE:</label>
+              <select className="win-input" value={callForm.incident_type} onChange={(e) => setCallForm({...callForm, incident_type: e.target.value})} style={{ width: '100%' }}>
+                <option value="Domestic Disturbance">Domestic Disturbance</option>
+                <option value="Traffic Accident">Traffic Accident</option>
+                <option value="Robbery">Robbery</option>
+                <option value="Assault">Assault</option>
+                <option value="Burglary">Burglary</option>
+                <option value="Suspicious Activity">Suspicious Activity</option>
+                <option value="Noise Complaint">Noise Complaint</option>
+                <option value="Medical Emergency">Medical Emergency</option>
+                <option value="Fire">Fire</option>
+                <option value="Traffic Stop">Traffic Stop</option>
+                <option value="Welfare Check">Welfare Check</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', display: 'block', marginBottom: '2px' }}>PRIORITY:</label>
+              <select className="win-input" value={callForm.priority} onChange={(e) => setCallForm({...callForm, priority: parseInt(e.target.value)})} style={{ width: '100%' }}>
+                <option value={1}>1 - CRITICAL</option>
+                <option value={2}>2 - HIGH</option>
+                <option value={3}>3 - MEDIUM</option>
+                <option value={4}>4 - LOW</option>
+                <option value={5}>5 - INFO</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ fontSize: '11px', display: 'block', marginBottom: '2px' }}>LOCATION:</label>
+              <input type="text" className="win-input" value={callForm.location} onChange={(e) => setCallForm({...callForm, location: e.target.value})} style={{ width: '100%' }} placeholder="123 Main St" required />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', display: 'block', marginBottom: '2px' }}>CALLER PHONE:</label>
+              <input type="text" className="win-input" value={callForm.caller_phone} onChange={(e) => setCallForm({...callForm, caller_phone: e.target.value})} style={{ width: '100%' }} placeholder="555-0100" />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', display: 'block', marginBottom: '2px' }}>DESCRIPTION:</label>
+              <input type="text" className="win-input" value={callForm.description} onChange={(e) => setCallForm({...callForm, description: e.target.value})} style={{ width: '100%' }} placeholder="Details..." />
+            </div>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '8px', marginTop: '4px' }}>
+              <button type="submit" className="win-button btn-primary" disabled={loading}>{loading ? 'CREATING...' : 'CREATE CALL'}</button>
+              <button type="button" className="win-button" onClick={() => setShowCreateCall(false)}>CANCEL</button>
+            </div>
+          </form>
+        </div>
+      )}
       
       <div style={{ maxHeight: '600px', overflow: 'auto' }}>
         {calls.map(call => (

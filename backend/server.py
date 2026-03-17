@@ -1497,6 +1497,47 @@ async def get_reports(current_user: User = Depends(get_current_user)):
     reports = await db.reports.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return reports
 
+# Create Records
+@api_router.post("/persons")
+async def create_person(person: dict, current_user: User = Depends(get_current_user)):
+    """Create a new person record."""
+    person['id'] = str(uuid.uuid4())
+    person['created_at'] = datetime.now(timezone.utc).isoformat()
+    person['updated_at'] = datetime.now(timezone.utc).isoformat()
+    person.setdefault('warrants', [])
+    person.setdefault('priors', [])
+    person.setdefault('citations', [])
+    await db.persons.insert_one(person)
+    return {"message": "Person created", "id": person['id']}
+
+@api_router.post("/vehicles")
+async def create_vehicle(vehicle: dict, current_user: User = Depends(get_current_user)):
+    """Create a new vehicle record."""
+    vehicle['id'] = str(uuid.uuid4())
+    vehicle['created_at'] = datetime.now(timezone.utc).isoformat()
+    vehicle.setdefault('flags', [])
+    await db.vehicles.insert_one(vehicle)
+    return {"message": "Vehicle created", "id": vehicle['id']}
+
+@api_router.post("/calls/create")
+async def create_call(call_data: dict, current_user: User = Depends(get_current_user)):
+    """Manually create a call/incident."""
+    call = {
+        "id": str(uuid.uuid4()),
+        "call_sid": f"MANUAL-{str(uuid.uuid4())[:8]}",
+        "caller_phone": call_data.get('caller_phone', 'MANUAL'),
+        "incident_type": call_data.get('incident_type', 'Other'),
+        "location": call_data.get('location', ''),
+        "description": call_data.get('description', ''),
+        "priority": call_data.get('priority', 3),
+        "status": "Active",
+        "assigned_officer": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.active_calls.insert_one(call)
+    return {"message": "Call created", "id": call['id']}
+
 # Seed Data
 @api_router.post("/seed/generate")
 async def generate_seed_data(current_user: User = Depends(get_current_user)):
