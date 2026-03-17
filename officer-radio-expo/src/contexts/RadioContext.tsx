@@ -66,6 +66,18 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
   const [currentResult, setCurrentResult] = useState<PersonRecord | VehicleRecord | null>(null);
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
 
+  // Play buffered audio response
+  const playBufferedResponse = useCallback(async () => {
+    try {
+      isReceivingAudio.current = false;
+      await audioManager.playBufferedAudio();
+      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
+    } catch (error) {
+      console.error('Failed to play buffered audio:', error);
+      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
+    }
+  }, [audioManager]);
+
   // Handle WebSocket messages
   const handleMessage = useCallback((message: WebSocketMessage) => {
     console.log('Handling message:', message.type);
@@ -105,7 +117,7 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
         playBufferedResponse();
         break;
 
-      case 'transcript':
+      case 'transcript': {
         // Add transcript to history
         const transcript: TranscriptItem = {
           speaker: message.payload.speaker,
@@ -120,13 +132,12 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
             currentTranscript: message.payload.text,
           }));
           
-          // If we were buffering audio, the transcript done means audio is complete
-          // Play whatever we have buffered
           if (isReceivingAudio.current) {
             playBufferedResponse();
           }
         }
         break;
+      }
 
       case 'function_result':
         // Display search result
@@ -143,63 +154,38 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
         }));
         break;
 
-      case 'dispatch_alert':
+      case 'dispatch_alert': {
         // New call dispatch — play alert tone then TTS the dispatch text
         console.log('DISPATCH ALERT:', message.payload);
-        handleDispatchAlert(message.payload);
-        break;
-    }
-  }, []);
-
-  // Play buffered audio response
-  const playBufferedResponse = async () => {
-    try {
-      isReceivingAudio.current = false;
-      await audioManager.playBufferedAudio();
-      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
-    } catch (error) {
-      console.error('Failed to play buffered audio:', error);
-      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
-    }
-  };
-
-  // Handle dispatch alert — play alert tone then speak the dispatch
-  const handleDispatchAlert = async (payload: any) => {
-    try {
-      setRadioState(prev => ({...prev, isReceiving: true, dispatcherSpeaking: true}));
-      
-      // Add dispatch to transcripts
-      const dispatchTranscript: TranscriptItem = {
-        speaker: 'dispatcher',
-        text: `🚨 DISPATCH: ${payload.dispatch_text || payload.incident_type}`,
-        timestamp: payload.timestamp || Date.now(),
-      };
-      setTranscripts(prev => [...prev, dispatchTranscript]);
-      
-      // Play alert tone using AudioManager
-      await audioManager.playRadioEffect('squelch');
-      
-      // Wait a moment for the tone, then send the dispatch text to OpenAI
-      // to be spoken through the existing audio pipeline
-      // We inject it as a conversation item so OpenAI speaks it
-      if (wsManager.current) {
-        wsManager.current.sendMessage({
-          type: 'speak_dispatch',
-          text: payload.dispatch_text,
-          timestamp: Date.now(),
+        const payload = message.payload;
+        
+        // Add dispatch to transcripts
+        const dispatchTranscript: TranscriptItem = {
+          speaker: 'dispatcher',
+          text: `🚨 DISPATCH: ${payload.dispatch_text || payload.incident_type}`,
+          timestamp: payload.timestamp || Date.now(),
+        };
+        setTranscripts(prev => [...prev, dispatchTranscript]);
+        
+        // Play alert tone then send dispatch text to OpenAI to speak
+        audioManager.playRadioEffect('squelch').then(() => {
+          if (wsManager.current) {
+            console.log('Sending speak_dispatch to backend:', payload.dispatch_text);
+            wsManager.current.sendMessage({
+              type: 'speak_dispatch',
+              text: payload.dispatch_text,
+              timestamp: Date.now(),
+            });
+          } else {
+            console.warn('wsManager not available for speak_dispatch');
+          }
         });
+        
+        // Don't set isReceiving here — let the audio_response/audio_done pipeline handle it
+        break;
       }
-      
-      // Reset state after a delay (OpenAI response will come through normal audio pipeline)
-      setTimeout(() => {
-        setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
-      }, 2000);
-      
-    } catch (error) {
-      console.error('Failed to handle dispatch alert:', error);
-      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
     }
-  };
+  }, [audioManager, playBufferedResponse]);
 
   // Connect to WebSocket
   const connect = useCallback(async (token: string) => {
