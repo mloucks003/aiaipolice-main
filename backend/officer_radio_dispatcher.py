@@ -64,114 +64,220 @@ class OfficerRadioDispatcher:
     def convert_audio_to_pcm16(self, base64_audio: str) -> str:
         """Convert incoming audio to PCM16 24kHz mono base64 for OpenAI.
         
-        Handles:
-        1. WAV files (from iOS LinearPCM recording) - strips header, resamples if needed
-        2. M4A/other formats - uses ffmpeg if available
+        Handles WAV, CAF (iOS), raw PCM, and falls back to ffmpeg for other formats.
         """
         try:
             audio_bytes = base64.b64decode(base64_audio)
-            logger.info(f"Received audio: {len(audio_bytes)} bytes, first 12 bytes: {audio_bytes[:12].hex() if len(audio_bytes) >= 12 else 'too short'}")
+            magic = audio_bytes[:12].hex() if len(audio_bytes) >= 12 else 'too short'
+            logger.info(f"Received audio: {len(audio_bytes)} bytes, magic: {magic}")
             
-            # Check if it's a WAV file (starts with RIFF header)
-            is_riff = len(audio_bytes) > 44 and audio_bytes[:4] == b'RIFF'
-            is_wave = len(audio_bytes) > 44 and audio_bytes[8:12] == b'WAVE'
-            logger.info(f"WAV detection: RIFF={is_riff}, WAVE={is_wave}, size_ok={len(audio_bytes) > 44}")
+            # 1. WAV file (RIFF...WAVE header)
+            if len(audio_bytes) > 44 and audio_bytes[:4] == b'RIFF' and audio_bytes[8:12] == b'WAVE':
+                logger.info("Detected WAV format")
+                return self._extract_pcm_from_wav(audio_bytes)
             
-            if is_riff and is_wave:
-                return self._convert_wav_to_pcm16(audio_bytes)
+            # 2. CAF file (iOS Core Audio Format - 'caff' magic)
+            if len(audio_bytes) > 8 and audio_bytes[:4] == b'caff':
+                logger.info("Detected CAF format")
+                return self._extract_pcm_from_caf(audio_bytes)
             
-            # Not WAV - try ffmpeg for M4A/other formats
-            return self._convert_with_ffmpeg(audio_bytes)
+            # 3. Try ffmpeg for any other format (M4A, MP3, etc.)
+            if self._has_ffmpeg():
+                return self._convert_with_ffmpeg(audio_bytes)
+            
+            # 4. Last resort: assume it's raw PCM16 data and resample if needed
+            logger.warning(f"Unknown format (magic: {magic}), attempting to treat as raw PCM16 24kHz")
+            return base64.b64encode(audio_bytes).decode('utf-8')
             
         except Exception as e:
             logger.error(f"Error converting audio: {e}")
             raise
     
-    def _convert_wav_to_pcm16(self, audio_bytes: bytes) -> str:
-        """Extract PCM16 data from WAV file. If already 24kHz/16bit/mono, just strip header.
-        Otherwise use ffmpeg to resample."""
+    def _extract_pcm_from_wav(self, audio_bytes: bytes) -> str:
+        """Extract PCM16 data from WAV file."""
+        channels = struct.unpack_from('<H', audio_bytes, 22)[0]
+        sample_rate = struct.unpack_from('<I', audio_bytes, 24)[0]
+        bits_per_sample = struct.unpack_from('<H', audio_bytes, 34)[0]
+        logger.info(f"WAV: {sample_rate}Hz, {channels}ch, {bits_per_sample}bit")
+        
+        # Find the 'data' chunk
+        data_offset, data_size = self._find_wav_data_chunk(audio_bytes)
+        pcm_data = audio_bytes[data_offset:data_offset + data_size]
+        
+        # If already correct format, send directly
+        if sample_rate == 24000 and channels == 1 and bits_per_sample == 16:
+            logger.info(f"WAV already correct format, {len(pcm_data)} bytes PCM16")
+            return base64.b64encode(pcm_data).decode('utf-8')
+        
+        # Need resampling - try ffmpeg first, then pure Python
+        if self._has_ffmpeg():
+            return self._convert_with_ffmpeg(audio_bytes)
+        
+        # Pure Python resample
+        return self._resample_pcm(pcm_data, sample_rate, channels, bits_per_sample)
+    
+    def _find_wav_data_chunk(self, audio_bytes: bytes) -> tuple:
+        """Find the data chunk offset and size in a WAV file."""
+        pos = 12  # Skip RIFF header
+        while pos < len(audio_bytes) - 8:
+            chunk_id = audio_bytes[pos:pos+4]
+            chunk_size = struct.unpack_from('<I', audio_bytes, pos + 4)[0]
+            if chunk_id == b'data':
+                return pos + 8, chunk_size
+            pos += 8 + chunk_size
+        # Fallback to standard offset
+        return 44, len(audio_bytes) - 44
+    
+    def _extract_pcm_from_caf(self, audio_bytes: bytes) -> str:
+        """Extract PCM16 data from CAF (Core Audio Format) file.
+        CAF structure: 'caff' header, then chunks with 4-byte type + 8-byte size."""
         try:
-            # Parse WAV header
-            channels = struct.unpack_from('<H', audio_bytes, 22)[0]
-            sample_rate = struct.unpack_from('<I', audio_bytes, 24)[0]
-            bits_per_sample = struct.unpack_from('<H', audio_bytes, 34)[0]
+            # CAF header: 'caff' (4) + version (2) + flags (2) = 8 bytes
+            pos = 8
+            sample_rate = 24000.0
+            channels = 1
+            bits_per_sample = 16
+            data_offset = 0
+            data_size = 0
             
-            logger.info(f"WAV: {sample_rate}Hz, {channels}ch, {bits_per_sample}bit")
-            
-            # Find the data chunk
-            data_offset = 44  # Standard WAV header size
-            # Some WAV files have extra chunks, search for 'data'
-            pos = 12
-            while pos < len(audio_bytes) - 8:
-                chunk_id = audio_bytes[pos:pos+4]
-                chunk_size = struct.unpack_from('<I', audio_bytes, pos + 4)[0]
-                if chunk_id == b'data':
-                    data_offset = pos + 8
+            while pos < len(audio_bytes) - 12:
+                chunk_type = audio_bytes[pos:pos+4]
+                chunk_size = struct.unpack_from('>q', audio_bytes, pos + 4)[0]  # CAF uses big-endian 64-bit size
+                
+                if chunk_type == b'desc':
+                    # Audio description chunk
+                    sample_rate = struct.unpack_from('>d', audio_bytes, pos + 12)[0]  # float64 big-endian
+                    fmt_id = audio_bytes[pos+20:pos+24]
+                    fmt_flags = struct.unpack_from('>I', audio_bytes, pos + 24)[0]
+                    bytes_per_packet = struct.unpack_from('>I', audio_bytes, pos + 28)[0]
+                    frames_per_packet = struct.unpack_from('>I', audio_bytes, pos + 32)[0]
+                    channels = struct.unpack_from('>I', audio_bytes, pos + 36)[0]
+                    bits_per_sample = struct.unpack_from('>I', audio_bytes, pos + 40)[0]
+                    logger.info(f"CAF desc: {sample_rate}Hz, {channels}ch, {bits_per_sample}bit, fmt={fmt_id}")
+                
+                elif chunk_type == b'data':
+                    # Data chunk - skip 4-byte edit count
+                    data_offset = pos + 12 + 4  # chunk header (12) + edit count (4)
+                    data_size = chunk_size - 4 if chunk_size > 0 else len(audio_bytes) - data_offset
                     break
-                pos += 8 + chunk_size
+                
+                pos += 12 + max(chunk_size, 0)
             
-            pcm_data = audio_bytes[data_offset:]
+            if data_offset == 0:
+                logger.error("No data chunk found in CAF file")
+                if self._has_ffmpeg():
+                    return self._convert_with_ffmpeg(audio_bytes)
+                raise Exception("Cannot parse CAF file")
             
-            # If already in the right format, send directly
-            if sample_rate == 24000 and channels == 1 and bits_per_sample == 16:
-                logger.info(f"WAV already in correct format, sending {len(pcm_data)} bytes PCM16")
+            pcm_data = audio_bytes[data_offset:data_offset + data_size]
+            logger.info(f"CAF extracted: {len(pcm_data)} bytes PCM, {sample_rate}Hz, {channels}ch, {bits_per_sample}bit")
+            
+            # CAF with lpcm stores data in big-endian by default on iOS
+            # We need little-endian for OpenAI
+            if bits_per_sample == 16:
+                # Swap byte order from big-endian to little-endian
+                pcm_array = bytearray(pcm_data)
+                for i in range(0, len(pcm_array) - 1, 2):
+                    pcm_array[i], pcm_array[i+1] = pcm_array[i+1], pcm_array[i]
+                pcm_data = bytes(pcm_array)
+            
+            # If correct sample rate and mono, send directly
+            if abs(sample_rate - 24000) < 1 and channels == 1 and bits_per_sample == 16:
+                logger.info(f"CAF already correct format, sending {len(pcm_data)} bytes")
                 return base64.b64encode(pcm_data).decode('utf-8')
             
-            # Need to resample - use ffmpeg
-            logger.info(f"WAV needs resampling from {sample_rate}Hz/{channels}ch/{bits_per_sample}bit")
-            return self._convert_with_ffmpeg(audio_bytes)
+            # Need resampling
+            if self._has_ffmpeg():
+                return self._convert_with_ffmpeg(audio_bytes)
+            
+            return self._resample_pcm(pcm_data, int(sample_rate), channels, bits_per_sample)
             
         except Exception as e:
-            logger.error(f"WAV parsing failed, trying ffmpeg: {e}")
-            return self._convert_with_ffmpeg(audio_bytes)
+            logger.error(f"CAF parsing error: {e}")
+            if self._has_ffmpeg():
+                return self._convert_with_ffmpeg(audio_bytes)
+            raise
+    
+    def _resample_pcm(self, pcm_data: bytes, src_rate: int, channels: int, bits: int) -> str:
+        """Pure Python PCM resampling to 24kHz mono 16-bit."""
+        logger.info(f"Python resampling: {src_rate}Hz/{channels}ch/{bits}bit -> 24000Hz/1ch/16bit")
+        
+        # Convert to samples
+        if bits == 16:
+            fmt = f'<{len(pcm_data)//2}h'
+            samples = list(struct.unpack(fmt, pcm_data[:len(pcm_data)//2*2]))
+        elif bits == 32:
+            fmt = f'<{len(pcm_data)//4}i'
+            raw = list(struct.unpack(fmt, pcm_data[:len(pcm_data)//4*4]))
+            samples = [s >> 16 for s in raw]  # Convert 32-bit to 16-bit range
+        else:
+            raise Exception(f"Unsupported bit depth: {bits}")
+        
+        # Mix to mono if stereo
+        if channels == 2:
+            mono = []
+            for i in range(0, len(samples) - 1, 2):
+                mono.append((samples[i] + samples[i+1]) // 2)
+            samples = mono
+        
+        # Resample using linear interpolation
+        if src_rate != 24000:
+            ratio = 24000.0 / src_rate
+            new_len = int(len(samples) * ratio)
+            resampled = []
+            for i in range(new_len):
+                src_pos = i / ratio
+                idx = int(src_pos)
+                frac = src_pos - idx
+                if idx + 1 < len(samples):
+                    val = int(samples[idx] * (1 - frac) + samples[idx + 1] * frac)
+                elif idx < len(samples):
+                    val = samples[idx]
+                else:
+                    break
+                resampled.append(max(-32768, min(32767, val)))
+            samples = resampled
+        
+        # Pack back to bytes
+        result = struct.pack(f'<{len(samples)}h', *samples)
+        logger.info(f"Resampled: {len(pcm_data)} bytes -> {len(result)} bytes PCM16 24kHz")
+        return base64.b64encode(result).decode('utf-8')
+    
+    def _has_ffmpeg(self) -> bool:
+        """Check if ffmpeg is available."""
+        try:
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return False
     
     def _convert_with_ffmpeg(self, audio_bytes: bytes) -> str:
         """Convert any audio format to PCM16 24kHz mono using ffmpeg."""
-        # Check if ffmpeg is available
-        try:
-            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            logger.error("ffmpeg not available and audio is not PCM16 WAV - cannot convert")
-            raise Exception("Audio conversion not possible: ffmpeg not available and audio format is not compatible")
-        
-        # Detect input format from magic bytes
         suffix = '.wav'
-        if len(audio_bytes) > 4:
-            if audio_bytes[4:8] == b'ftyp':
+        if len(audio_bytes) > 8:
+            if audio_bytes[:4] == b'caff':
+                suffix = '.caf'
+            elif len(audio_bytes) > 4 and audio_bytes[4:8] == b'ftyp':
                 suffix = '.m4a'
-            elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
-                suffix = '.mp3'
         
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as input_file:
-            input_path = input_file.name
-            input_file.write(audio_bytes)
-        
-        with tempfile.NamedTemporaryFile(suffix='.pcm', delete=False) as output_file:
-            output_path = output_file.name
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            input_path = f.name
+            f.write(audio_bytes)
+        with tempfile.NamedTemporaryFile(suffix='.pcm', delete=False) as f:
+            output_path = f.name
         
         try:
-            result = subprocess.run([
-                'ffmpeg',
-                '-i', input_path,
-                '-f', 's16le',
-                '-acodec', 'pcm_s16le',
-                '-ar', '24000',
-                '-ac', '1',
-                '-y',
-                output_path
-            ], 
-            capture_output=True, 
-            check=True,
-            timeout=10
-            )
+            subprocess.run([
+                'ffmpeg', '-i', input_path,
+                '-f', 's16le', '-acodec', 'pcm_s16le',
+                '-ar', '24000', '-ac', '1', '-y', output_path
+            ], capture_output=True, check=True, timeout=10)
             
             with open(output_path, 'rb') as f:
                 pcm_bytes = f.read()
             
-            pcm_base64 = base64.b64encode(pcm_bytes).decode('utf-8')
-            logger.info(f"ffmpeg converted: {len(audio_bytes)} bytes -> {len(pcm_bytes)} bytes PCM16")
-            return pcm_base64
-            
+            logger.info(f"ffmpeg: {len(audio_bytes)} -> {len(pcm_bytes)} bytes PCM16")
+            return base64.b64encode(pcm_bytes).decode('utf-8')
         finally:
             try:
                 os.unlink(input_path)
