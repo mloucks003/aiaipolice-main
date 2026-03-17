@@ -353,7 +353,7 @@ class AudioManager {
 
         // Play it — wait for completion before resolving
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
+          allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
         });
 

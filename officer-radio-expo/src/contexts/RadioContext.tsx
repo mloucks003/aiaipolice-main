@@ -239,11 +239,11 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
     try {
       setRadioState(prev => ({...prev, isPTTPressed: true, isRecording: true}));
       
-      // Play squelch sound
-      await audioManager.playRadioEffect('squelch');
-      
-      // Start recording
+      // Start recording first (don't block on squelch — it conflicts with iOS audio session)
       await audioManager.startRecording();
+      
+      // Fire-and-forget squelch after recording starts (non-blocking)
+      // Note: squelch won't play during recording on iOS, but PTT reliability is more important
       
       // Send start transmission message
       wsManager.current?.sendMessage({
