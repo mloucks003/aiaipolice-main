@@ -1284,7 +1284,7 @@ async def search_person(
     if dob:
         query["dob"] = dob
     if dl:
-        query["drivers_license"] = dl
+        query["drivers_license"] = {"$regex": dl, "$options": "i"}
     
     results = await db.persons.find(query, {"_id": 0}).to_list(100)
     return results
