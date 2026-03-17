@@ -2,7 +2,7 @@
  * AudioManager - Handles audio recording, playback, and radio effects using expo-av
  * 
  * Key audio flow:
- * - Recording: Expo records M4A -> sent as base64 to backend -> backend converts to PCM16 via ffmpeg -> OpenAI
+ * - Recording: Expo records PCM16 WAV (24kHz mono on iOS) -> sent as base64 to backend -> backend strips WAV header -> OpenAI
  * - Playback: OpenAI sends PCM16 base64 chunks -> we buffer them -> write WAV file -> play with expo-av
  */
 
@@ -58,10 +58,36 @@ class AudioManager {
       this.audioChunks = [];
       this.sequenceNumber = 0;
 
-      // Create new recording with M4A format (backend will convert to PCM16)
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      // Record as uncompressed PCM-like WAV (LinearPCM) so backend can easily convert
+      // or send directly to OpenAI without ffmpeg
+      const recordingOptions: Audio.RecordingOptions = {
+        isMeteringEnabled: false,
+        android: {
+          extension: '.wav',
+          outputFormat: 2, // THREE_GPP as fallback, Android doesn't support raw PCM easily
+          audioEncoder: 1, // DEFAULT
+          sampleRate: 24000,
+          numberOfChannels: 1,
+          bitRate: 384000,
+        },
+        ios: {
+          extension: '.wav',
+          outputFormat: 'lpcm', // Linear PCM - uncompressed
+          audioQuality: 127, // max
+          sampleRate: 24000,
+          numberOfChannels: 1,
+          bitRate: 384000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/wav',
+          bitsPerSecond: 384000,
+        },
+      };
+
+      const { recording } = await Audio.Recording.createAsync(recordingOptions);
       
       this.recording = recording;
       console.log('Recording started');

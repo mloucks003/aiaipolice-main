@@ -2,9 +2,9 @@
  * RadioContext - Manages radio state and integrates audio/WebSocket
  * 
  * Audio flow:
- * 1. Officer presses PTT -> starts recording M4A
- * 2. Officer releases PTT -> sends M4A base64 to backend
- * 3. Backend converts M4A to PCM16 -> sends to OpenAI
+ * 1. Officer presses PTT -> starts recording PCM16 WAV (24kHz mono)
+ * 2. Officer releases PTT -> sends WAV base64 to backend
+ * 3. Backend strips WAV header -> sends PCM16 to OpenAI
  * 4. OpenAI streams PCM16 audio chunks back -> we buffer them
  * 5. When response is done -> combine chunks into WAV -> play
  */

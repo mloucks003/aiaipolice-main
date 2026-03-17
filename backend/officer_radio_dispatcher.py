@@ -61,70 +61,119 @@ class OfficerRadioDispatcher:
         self.mobile_ws = websocket
         self.openai_ws = None
     
-    def convert_m4a_to_pcm16(self, base64_audio: str) -> str:
-        """Convert M4A base64 audio to PCM16 24kHz mono base64 using ffmpeg.
-        Falls back to sending raw data if ffmpeg is not available."""
+    def convert_audio_to_pcm16(self, base64_audio: str) -> str:
+        """Convert incoming audio to PCM16 24kHz mono base64 for OpenAI.
+        
+        Handles:
+        1. WAV files (from iOS LinearPCM recording) - strips header, resamples if needed
+        2. M4A/other formats - uses ffmpeg if available
+        """
         try:
-            # Decode base64 to bytes
             audio_bytes = base64.b64decode(base64_audio)
+            logger.info(f"Received audio: {len(audio_bytes)} bytes")
             
-            # Check if ffmpeg is available
-            try:
-                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
-            except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                logger.warning("ffmpeg not available, attempting to send audio as-is")
-                # If no ffmpeg, return the original base64 - OpenAI may still handle it
-                return base64_audio
+            # Check if it's a WAV file (starts with RIFF header)
+            if len(audio_bytes) > 44 and audio_bytes[:4] == b'RIFF' and audio_bytes[8:12] == b'WAVE':
+                return self._convert_wav_to_pcm16(audio_bytes)
             
-            # Create temporary files for input and output
-            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as input_file:
-                input_path = input_file.name
-                input_file.write(audio_bytes)
+            # Not WAV - try ffmpeg for M4A/other formats
+            return self._convert_with_ffmpeg(audio_bytes)
             
-            with tempfile.NamedTemporaryFile(suffix='.pcm', delete=False) as output_file:
-                output_path = output_file.name
-            
-            try:
-                # Use ffmpeg to convert: M4A -> PCM16 24kHz mono
-                result = subprocess.run([
-                    'ffmpeg',
-                    '-i', input_path,           # Input file
-                    '-f', 's16le',              # Output format: signed 16-bit little-endian
-                    '-acodec', 'pcm_s16le',     # Audio codec: PCM 16-bit
-                    '-ar', '24000',             # Sample rate: 24kHz
-                    '-ac', '1',                 # Channels: mono
-                    '-y',                       # Overwrite output file
-                    output_path                 # Output file
-                ], 
-                capture_output=True, 
-                check=True,
-                timeout=10
-                )
-                
-                # Read the converted PCM data
-                with open(output_path, 'rb') as f:
-                    pcm_bytes = f.read()
-                
-                # Encode to base64
-                pcm_base64 = base64.b64encode(pcm_bytes).decode('utf-8')
-                
-                logger.info(f"Converted audio: {len(audio_bytes)} bytes M4A -> {len(pcm_bytes)} bytes PCM16")
-                return pcm_base64
-                
-            finally:
-                # Clean up temporary files
-                try:
-                    os.unlink(input_path)
-                    os.unlink(output_path)
-                except:
-                    pass
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"ffmpeg conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
-            raise Exception(f"Audio conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
         except Exception as e:
             logger.error(f"Error converting audio: {e}")
             raise
+    
+    def _convert_wav_to_pcm16(self, audio_bytes: bytes) -> str:
+        """Extract PCM16 data from WAV file. If already 24kHz/16bit/mono, just strip header.
+        Otherwise use ffmpeg to resample."""
+        try:
+            # Parse WAV header
+            channels = struct.unpack_from('<H', audio_bytes, 22)[0]
+            sample_rate = struct.unpack_from('<I', audio_bytes, 24)[0]
+            bits_per_sample = struct.unpack_from('<H', audio_bytes, 34)[0]
+            
+            logger.info(f"WAV: {sample_rate}Hz, {channels}ch, {bits_per_sample}bit")
+            
+            # Find the data chunk
+            data_offset = 44  # Standard WAV header size
+            # Some WAV files have extra chunks, search for 'data'
+            pos = 12
+            while pos < len(audio_bytes) - 8:
+                chunk_id = audio_bytes[pos:pos+4]
+                chunk_size = struct.unpack_from('<I', audio_bytes, pos + 4)[0]
+                if chunk_id == b'data':
+                    data_offset = pos + 8
+                    break
+                pos += 8 + chunk_size
+            
+            pcm_data = audio_bytes[data_offset:]
+            
+            # If already in the right format, send directly
+            if sample_rate == 24000 and channels == 1 and bits_per_sample == 16:
+                logger.info(f"WAV already in correct format, sending {len(pcm_data)} bytes PCM16")
+                return base64.b64encode(pcm_data).decode('utf-8')
+            
+            # Need to resample - use ffmpeg
+            logger.info(f"WAV needs resampling from {sample_rate}Hz/{channels}ch/{bits_per_sample}bit")
+            return self._convert_with_ffmpeg(audio_bytes)
+            
+        except Exception as e:
+            logger.error(f"WAV parsing failed, trying ffmpeg: {e}")
+            return self._convert_with_ffmpeg(audio_bytes)
+    
+    def _convert_with_ffmpeg(self, audio_bytes: bytes) -> str:
+        """Convert any audio format to PCM16 24kHz mono using ffmpeg."""
+        # Check if ffmpeg is available
+        try:
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            logger.error("ffmpeg not available and audio is not PCM16 WAV - cannot convert")
+            raise Exception("Audio conversion not possible: ffmpeg not available and audio format is not compatible")
+        
+        # Detect input format from magic bytes
+        suffix = '.wav'
+        if len(audio_bytes) > 4:
+            if audio_bytes[4:8] == b'ftyp':
+                suffix = '.m4a'
+            elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+                suffix = '.mp3'
+        
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as input_file:
+            input_path = input_file.name
+            input_file.write(audio_bytes)
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcm', delete=False) as output_file:
+            output_path = output_file.name
+        
+        try:
+            result = subprocess.run([
+                'ffmpeg',
+                '-i', input_path,
+                '-f', 's16le',
+                '-acodec', 'pcm_s16le',
+                '-ar', '24000',
+                '-ac', '1',
+                '-y',
+                output_path
+            ], 
+            capture_output=True, 
+            check=True,
+            timeout=10
+            )
+            
+            with open(output_path, 'rb') as f:
+                pcm_bytes = f.read()
+            
+            pcm_base64 = base64.b64encode(pcm_bytes).decode('utf-8')
+            logger.info(f"ffmpeg converted: {len(audio_bytes)} bytes -> {len(pcm_bytes)} bytes PCM16")
+            return pcm_base64
+            
+        finally:
+            try:
+                os.unlink(input_path)
+                os.unlink(output_path)
+            except:
+                pass
         
     async def connect_to_openai(self):
         """Connect to OpenAI Realtime API"""
@@ -225,9 +274,9 @@ Keep it professional and efficient.""",
                 message_type = data.get('type')
                 
                 if message_type == 'audio_stream':
-                    # Convert M4A to PCM16 before sending to OpenAI
+                    # Convert audio to PCM16 before sending to OpenAI
                     try:
-                        pcm16_audio = self.convert_m4a_to_pcm16(data['audio'])
+                        pcm16_audio = self.convert_audio_to_pcm16(data['audio'])
                         
                         # Forward converted audio to OpenAI
                         audio_append = {
