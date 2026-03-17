@@ -449,6 +449,26 @@ Keep it professional and efficient.""",
                             await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
                         except Exception:
                             pass
+                
+                elif message_type == 'speak_dispatch':
+                    # Dispatch alert — inject text into conversation and have OpenAI speak it
+                    dispatch_text = data.get('text', '')
+                    if dispatch_text and self.openai_ws:
+                        logger.info(f"Officer {self.officer_id} - Speaking dispatch: {dispatch_text}")
+                        # Add as a user message (as if dispatch typed it)
+                        await self.openai_ws.send(json.dumps({
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "user",
+                                "content": [{
+                                    "type": "input_text",
+                                    "text": f"[DISPATCH ALERT - Read this aloud exactly as a radio dispatch announcement]: {dispatch_text}"
+                                }]
+                            }
+                        }))
+                        # Trigger response so OpenAI speaks it
+                        await self.openai_ws.send(json.dumps({"type": "response.create"}))
                     
         except Exception as e:
             logger.error(f"Error handling mobile audio for officer {self.officer_id}: {e}")

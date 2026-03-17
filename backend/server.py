@@ -58,6 +58,9 @@ TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY')
 
 # Initialize clients
+
+# Connected officer radio WebSockets (officer_id -> websocket)
+connected_officer_radios = {}
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID else None
 
@@ -1536,7 +1539,39 @@ async def create_call(call_data: dict, current_user: User = Depends(get_current_
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     await db.active_calls.insert_one(call)
-    return {"message": "Call created", "id": call['id']}
+    
+    # Broadcast dispatch alert to all connected officer radios
+    priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
+    dispatch_text = f"Dispatch alert. Priority {priority_labels.get(call['priority'], 'MEDIUM')}. {call['incident_type']} at {call['location']}."
+    if call['description']:
+        dispatch_text += f" {call['description']}."
+    dispatch_text += " All available units respond."
+    
+    alert_message = json.dumps({
+        "type": "dispatch_alert",
+        "call_id": call['id'],
+        "incident_type": call['incident_type'],
+        "location": call['location'],
+        "description": call['description'],
+        "priority": call['priority'],
+        "dispatch_text": dispatch_text,
+        "timestamp": datetime.now(timezone.utc).timestamp()
+    })
+    
+    disconnected = []
+    for officer_id, ws in connected_officer_radios.items():
+        try:
+            await ws.send_text(alert_message)
+            logger.info(f"Dispatch alert sent to officer {officer_id}")
+        except Exception as e:
+            logger.warning(f"Failed to send dispatch alert to officer {officer_id}: {e}")
+            disconnected.append(officer_id)
+    
+    # Clean up disconnected officers
+    for officer_id in disconnected:
+        connected_officer_radios.pop(officer_id, None)
+    
+    return {"message": "Call created", "id": call['id'], "officers_notified": len(connected_officer_radios)}
 
 # Seed Data
 @api_router.post("/seed/generate")
@@ -1651,6 +1686,10 @@ async def websocket_officer_radio(websocket: WebSocket, token: str):
             websocket=websocket
         )
         
+        # Register this officer's WebSocket for dispatch alerts
+        connected_officer_radios[user_id] = websocket
+        logger.info(f"Officer {user.get('username')} registered for dispatch alerts ({len(connected_officer_radios)} officers online)")
+        
         # Run bidirectional streaming
         await dispatcher.run()
             
@@ -1660,6 +1699,10 @@ async def websocket_officer_radio(websocket: WebSocket, token: str):
         logger.error(f"WebSocket error for officer {user.get('username')}: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Unregister on disconnect
+        connected_officer_radios.pop(user_id, None)
+        logger.info(f"Officer {user.get('username')} unregistered from dispatch alerts ({len(connected_officer_radios)} officers online)")
 
 
 

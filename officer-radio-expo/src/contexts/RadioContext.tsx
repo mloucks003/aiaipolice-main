@@ -142,6 +142,12 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
           lastError: message.payload?.message || message.payload?.error || 'Unknown error',
         }));
         break;
+
+      case 'dispatch_alert':
+        // New call dispatch — play alert tone then TTS the dispatch text
+        console.log('DISPATCH ALERT:', message.payload);
+        handleDispatchAlert(message.payload);
+        break;
     }
   }, []);
 
@@ -153,6 +159,44 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
       setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
     } catch (error) {
       console.error('Failed to play buffered audio:', error);
+      setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
+    }
+  };
+
+  // Handle dispatch alert — play alert tone then speak the dispatch
+  const handleDispatchAlert = async (payload: any) => {
+    try {
+      setRadioState(prev => ({...prev, isReceiving: true, dispatcherSpeaking: true}));
+      
+      // Add dispatch to transcripts
+      const dispatchTranscript: TranscriptItem = {
+        speaker: 'dispatcher',
+        text: `🚨 DISPATCH: ${payload.dispatch_text || payload.incident_type}`,
+        timestamp: payload.timestamp || Date.now(),
+      };
+      setTranscripts(prev => [...prev, dispatchTranscript]);
+      
+      // Play alert tone using AudioManager
+      await audioManager.playRadioEffect('squelch');
+      
+      // Wait a moment for the tone, then send the dispatch text to OpenAI
+      // to be spoken through the existing audio pipeline
+      // We inject it as a conversation item so OpenAI speaks it
+      if (wsManager.current) {
+        wsManager.current.sendMessage({
+          type: 'speak_dispatch',
+          text: payload.dispatch_text,
+          timestamp: Date.now(),
+        });
+      }
+      
+      // Reset state after a delay (OpenAI response will come through normal audio pipeline)
+      setTimeout(() => {
+        setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Failed to handle dispatch alert:', error);
       setRadioState(prev => ({...prev, isReceiving: false, dispatcherSpeaking: false}));
     }
   };

@@ -10,7 +10,7 @@ export interface WebSocketConfig {
 }
 
 export interface WebSocketMessage {
-  type: 'audio' | 'audio_response' | 'audio_done' | 'transcript' | 'function_result' | 'error' | 'connection';
+  type: 'audio' | 'audio_response' | 'audio_done' | 'transcript' | 'function_result' | 'error' | 'connection' | 'dispatch_alert';
   payload: any;
   timestamp: number;
 }
