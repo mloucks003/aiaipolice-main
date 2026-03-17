@@ -27,41 +27,6 @@ export default function ActiveCalls({ token, user }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Initialize audio context
-  useEffect(() => {
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-  }, []);
-
-  const playAlarmSound = () => {
-    if (!soundEnabled || !audioContextRef.current) return;
-
-    const audioContext = audioContextRef.current;
-    
-    // Play 2 loud alert beeps to get attention
-    const playBeep = (delay) => {
-      setTimeout(() => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.value = 1000;  // High pitched alert tone
-        oscillator.type = 'square';  // More attention-grabbing than sine
-        
-        gainNode.gain.setValueAtTime(0.6, audioContext.currentTime);  // Louder (60%)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
-        
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.2);
-      }, delay);
-    };
-
-    // Play only 2 short loud beeps
-    playBeep(0);      // First beep
-    playBeep(300);    // Second beep
-  };
-
   const playDispatchAudio = (audioUrl) => {
     if (!soundEnabled || !audioUrl) {
       console.log('Dispatch audio not playing:', { soundEnabled, audioUrl });

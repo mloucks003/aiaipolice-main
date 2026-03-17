@@ -1540,12 +1540,19 @@ async def create_call(call_data: dict, current_user: User = Depends(get_current_
     }
     await db.active_calls.insert_one(call)
     
-    # Broadcast dispatch alert to all connected officer radios
+    # Broadcast dispatch alert to connected officer radios
+    # For priority 1-2 (critical/high), alert ALL officers
+    # For priority 3+ (medium/low), alert only ONE officer
     priority_labels = {1: 'CRITICAL', 2: 'HIGH', 3: 'MEDIUM', 4: 'LOW', 5: 'INFO'}
-    dispatch_text = f"Dispatch alert. Priority {priority_labels.get(call['priority'], 'MEDIUM')}. {call['incident_type']} at {call['location']}."
+    priority = call['priority']
+    dispatch_text = f"Dispatch alert. Priority {priority_labels.get(priority, 'MEDIUM')}. {call['incident_type']} at {call['location']}."
     if call['description']:
         dispatch_text += f" {call['description']}."
-    dispatch_text += " All available units respond."
+    
+    if priority <= 2:
+        dispatch_text += " All available units respond."
+    else:
+        dispatch_text += " One unit respond."
     
     alert_message = json.dumps({
         "type": "dispatch_alert",
@@ -1559,10 +1566,15 @@ async def create_call(call_data: dict, current_user: User = Depends(get_current_
     })
     
     disconnected = []
+    officers_notified = 0
     for officer_id, ws in connected_officer_radios.items():
         try:
             await ws.send_text(alert_message)
             logger.info(f"Dispatch alert sent to officer {officer_id}")
+            officers_notified += 1
+            # For non-critical calls, only notify one officer
+            if priority > 2:
+                break
         except Exception as e:
             logger.warning(f"Failed to send dispatch alert to officer {officer_id}: {e}")
             disconnected.append(officer_id)
@@ -1571,7 +1583,7 @@ async def create_call(call_data: dict, current_user: User = Depends(get_current_
     for officer_id in disconnected:
         connected_officer_radios.pop(officer_id, None)
     
-    return {"message": "Call created", "id": call['id'], "officers_notified": len(connected_officer_radios)}
+    return {"message": "Call created", "id": call['id'], "officers_notified": officers_notified}
 
 # Seed Data
 @api_router.post("/seed/generate")
