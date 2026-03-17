@@ -257,14 +257,127 @@ class AudioManager {
   /**
    * Play a radio sound effect (placeholder for MVP)
    */
-  async playRadioEffect(effect: 'squelch' | 'beep'): Promise<void> {
-    try {
-      console.log(`Radio effect: ${effect}`);
-      // Sound effects can be added later with actual audio files
-    } catch (error) {
-      console.error(`Failed to play radio effect ${effect}:`, error);
+  /**
+     * Play a radio sound effect — generates tones programmatically
+     */
+    async playRadioEffect(effect: 'squelch' | 'beep' | 'dispatch_tone' | 'priority_tone'): Promise<void> {
+      try {
+        console.log(`Radio effect: ${effect}`);
+        const sampleRate = 24000;
+        let pcmSamples: Int16Array;
+
+        switch (effect) {
+          case 'squelch': {
+            // Short white noise burst + sine sweep, ~150ms
+            const duration = 0.15;
+            const numSamples = Math.floor(sampleRate * duration);
+            pcmSamples = new Int16Array(numSamples);
+            for (let i = 0; i < numSamples; i++) {
+              const t = i / sampleRate;
+              // White noise fading out + rising sine sweep
+              const noise = (Math.random() * 2 - 1) * (1 - t / duration) * 0.4;
+              const sweepFreq = 800 + (t / duration) * 2000;
+              const sine = Math.sin(2 * Math.PI * sweepFreq * t) * 0.3 * (1 - t / duration);
+              pcmSamples[i] = Math.max(-32768, Math.min(32767, Math.round((noise + sine) * 32767)));
+            }
+            break;
+          }
+          case 'beep': {
+            // Simple 1kHz sine tone, ~100ms
+            const duration = 0.1;
+            const numSamples = Math.floor(sampleRate * duration);
+            pcmSamples = new Int16Array(numSamples);
+            for (let i = 0; i < numSamples; i++) {
+              const t = i / sampleRate;
+              const envelope = Math.min(1, Math.min(t * 20, (duration - t) * 20)); // fade in/out
+              pcmSamples[i] = Math.round(Math.sin(2 * Math.PI * 1000 * t) * 0.5 * envelope * 32767);
+            }
+            break;
+          }
+          case 'dispatch_tone': {
+            // Two-tone alert (like real dispatch): 1000Hz then 1500Hz, ~400ms total
+            const toneDuration = 0.2;
+            const numSamples = Math.floor(sampleRate * toneDuration * 2);
+            pcmSamples = new Int16Array(numSamples);
+            const half = Math.floor(sampleRate * toneDuration);
+            for (let i = 0; i < numSamples; i++) {
+              const t = i / sampleRate;
+              const freq = i < half ? 1000 : 1500;
+              const localT = i < half ? t : t - toneDuration;
+              const envelope = Math.min(1, Math.min(localT * 20, (toneDuration - localT) * 20));
+              pcmSamples[i] = Math.round(Math.sin(2 * Math.PI * freq * t) * 0.6 * envelope * 32767);
+            }
+            break;
+          }
+          case 'priority_tone': {
+            // Urgent repeating beep: 3 fast beeps at 1800Hz, ~500ms total
+            const beepLen = 0.08;
+            const gapLen = 0.06;
+            const totalDuration = (beepLen + gapLen) * 3;
+            const numSamples = Math.floor(sampleRate * totalDuration);
+            pcmSamples = new Int16Array(numSamples);
+            for (let i = 0; i < numSamples; i++) {
+              const t = i / sampleRate;
+              const cyclePos = t % (beepLen + gapLen);
+              if (cyclePos < beepLen) {
+                const env = Math.min(1, Math.min(cyclePos * 30, (beepLen - cyclePos) * 30));
+                pcmSamples[i] = Math.round(Math.sin(2 * Math.PI * 1800 * t) * 0.7 * env * 32767);
+              } else {
+                pcmSamples[i] = 0;
+              }
+            }
+            break;
+          }
+          default:
+            return;
+        }
+
+        // Convert Int16Array to Uint8Array (little-endian PCM16)
+        const pcmBytes = new Uint8Array(pcmSamples.length * 2);
+        for (let i = 0; i < pcmSamples.length; i++) {
+          pcmBytes[i * 2] = pcmSamples[i] & 0xFF;
+          pcmBytes[i * 2 + 1] = (pcmSamples[i] >> 8) & 0xFF;
+        }
+
+        // Create WAV
+        const wavHeader = this.createWavHeader(pcmBytes.length, sampleRate, 1, 16);
+        const wavBytes = new Uint8Array(wavHeader.length + pcmBytes.length);
+        wavBytes.set(wavHeader, 0);
+        wavBytes.set(pcmBytes, wavHeader.length);
+
+        const wavBase64 = this.bytesToBase64(wavBytes);
+        const tempPath = `${FileSystem.cacheDirectory}radio_effect_${effect}_${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(tempPath, wavBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // Play it — wait for completion before resolving
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        });
+
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: tempPath },
+          { shouldPlay: true, volume: 1.0 }
+        );
+
+        await new Promise<void>((resolve) => {
+          sound.setOnPlaybackStatusUpdate((status) => {
+            if (status.isLoaded && status.didJustFinish) {
+              sound.unloadAsync();
+              FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+              resolve();
+            }
+          });
+          // Safety timeout
+          setTimeout(() => resolve(), 2000);
+        });
+      } catch (error) {
+        console.error(`Failed to play radio effect ${effect}:`, error);
+      }
     }
-  }
+
 
   /**
    * Stop all audio playback

@@ -167,8 +167,9 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
         };
         setTranscripts(prev => [...prev, dispatchTranscript]);
         
-        // Play alert tone then send dispatch text to OpenAI to speak
-        audioManager.playRadioEffect('squelch').then(() => {
+        // Play alert tone (priority tone for high-priority, dispatch tone otherwise)
+        const alertEffect = (payload.priority && payload.priority <= 2) ? 'priority_tone' : 'dispatch_tone';
+        audioManager.playRadioEffect(alertEffect).then(() => {
           if (wsManager.current) {
             console.log('Sending speak_dispatch to backend:', payload.dispatch_text);
             wsManager.current.sendMessage({
