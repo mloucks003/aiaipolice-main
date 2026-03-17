@@ -255,7 +255,7 @@ class WebSocketManager {
       if (this.connectionState.isConnected && this.ws) {
         this.sendMessage({type: 'ping', timestamp: Date.now()});
       }
-    }, 30000); // Ping every 30 seconds
+    }, 20000); // Ping every 20 seconds (Heroku has 55s idle timeout)
   }
 
   /**

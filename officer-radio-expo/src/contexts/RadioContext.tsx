@@ -197,7 +197,7 @@ export const RadioProvider: React.FC<RadioProviderProps> = ({children, wsUrl}) =
         url: wsUrl,
         token,
         reconnectInterval: 1000,
-        maxReconnectAttempts: 10,
+        maxReconnectAttempts: 50,
       });
 
       // Register message handler

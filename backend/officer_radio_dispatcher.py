@@ -466,7 +466,11 @@ CRITICAL RULES:
                 message_type = data.get('type')
                 
                 if message_type == 'ping':
-                    # Respond to keepalive pings
+                    # Respond to keepalive pings — Heroku needs bidirectional traffic
+                    try:
+                        await self.mobile_ws.send_text(json.dumps({"type": "pong", "timestamp": data.get("timestamp", 0)}))
+                    except Exception:
+                        pass
                     continue
                 
                 elif message_type == 'audio_stream':
