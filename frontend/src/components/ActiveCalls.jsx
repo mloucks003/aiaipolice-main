@@ -101,9 +101,6 @@ export default function ActiveCalls({ token, user }) {
       if (newActiveCalls.length > 0 && soundEnabled) {
         console.log('NEW ACTIVE CALL:', newActiveCalls.length);
         
-        // Play alarm beeps
-        playAlarmSound();
-        
         // Play dispatch audio
         newActiveCalls.forEach(call => {
           if (call.dispatch_audio_url) {
