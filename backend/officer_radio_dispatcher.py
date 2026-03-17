@@ -949,15 +949,28 @@ CRITICAL RULES:
             return {"error": f"Failed to clear call: {str(e)}"}
 
     
+    async def _server_keepalive(self):
+        """Send periodic pings from server to keep Heroku WS alive"""
+        try:
+            while True:
+                await asyncio.sleep(15)
+                try:
+                    await self.mobile_ws.send_text(json.dumps({"type": "server_ping", "timestamp": datetime.now(timezone.utc).timestamp()}))
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
+
     async def run(self):
         """Main loop - bidirectional audio streaming"""
         try:
             await self.connect_to_openai()
             
-            # Run both handlers concurrently
+            # Run handlers + server keepalive concurrently
             await asyncio.gather(
                 self.handle_mobile_audio(),
-                self.handle_openai_responses()
+                self.handle_openai_responses(),
+                self._server_keepalive()
             )
             
         except Exception as e:
