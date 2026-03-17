@@ -216,6 +216,9 @@ class OfficerRadioDispatcher:
     
     def _resample_pcm(self, pcm_data: bytes, src_rate: int, channels: int, bits: int) -> str:
         """Pure Python PCM resampling to 24kHz mono 16-bit."""
+        # Default unknown bit depth to 16 (our iOS recording config)
+        if bits == 0:
+            bits = 16
         logger.info(f"Python resampling: {src_rate}Hz/{channels}ch/{bits}bit -> 24000Hz/1ch/16bit")
         
         # Convert to samples
