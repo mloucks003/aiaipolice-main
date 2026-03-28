@@ -1012,6 +1012,7 @@ CRITICAL RULES:
             self._check_ofac_sanctions(first_name, last_name),
             self._check_sex_offender(first_name, last_name, state),
             self._check_court_records(first_name, last_name),
+            self._check_arkansas_courts(first_name, last_name),
             return_exceptions=True
         )
         
@@ -1020,6 +1021,7 @@ CRITICAL RULES:
         ofac_result = results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
         sex_offender_result = results[3] if not isinstance(results[3], Exception) else {"error": str(results[3])}
         court_result = results[4] if not isinstance(results[4], Exception) else {"error": str(results[4])}
+        arkansas_result = results[5] if not isinstance(results[5], Exception) else {"error": str(results[5])}
         
         return {
             "subject": f"{first_name} {last_name}".strip(),
@@ -1027,7 +1029,8 @@ CRITICAL RULES:
             "fbi_wanted": fbi_result,
             "ofac_sanctions": ofac_result,
             "sex_offender_registry": sex_offender_result,
-            "court_records": court_result
+            "federal_court_records": court_result,
+            "arkansas_court_records": arkansas_result
         }
     
     async def _check_local_db(self, first_name: str, last_name: str, dob: str):
@@ -1228,6 +1231,78 @@ CRITICAL RULES:
             return {"hit": False, "message": "Court records timeout"}
         except Exception as e:
             return {"hit": False, "message": f"Court records error: {str(e)}"}
+    
+    async def _check_arkansas_courts(self, first_name: str, last_name: str):
+        """Check Arkansas state and federal courts via CourtListener"""
+        try:
+            name = f"{first_name} {last_name}".strip()
+            all_cases = []
+            total = 0
+            
+            # Search 1: Arkansas federal courts (Eastern + Western District)
+            federal_url = "https://www.courtlistener.com/api/rest/v4/search/"
+            federal_params = {
+                "q": f'"{name}"',
+                "type": "r",
+                "court": "arwd ared",
+                "order_by": "score desc",
+                "page_size": 10
+            }
+            
+            # Search 2: Arkansas state appellate courts (Court of Appeals + Supreme Court)
+            state_url = "https://www.courtlistener.com/api/rest/v4/search/"
+            state_params = {
+                "q": f'"{name}"',
+                "type": "o",
+                "court": "arkctapp arksupremecourt",
+                "order_by": "score desc",
+                "page_size": 10
+            }
+            
+            headers = {"Accept": "application/json"}
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                # Run both searches in parallel
+                federal_task = session.get(federal_url, params=federal_params, headers=headers)
+                state_task = session.get(state_url, params=state_params, headers=headers)
+                
+                federal_resp, state_resp = await asyncio.gather(federal_task, state_task, return_exceptions=True)
+                
+                # Process federal results
+                if not isinstance(federal_resp, Exception) and federal_resp.status == 200:
+                    data = await federal_resp.json()
+                    total += data.get('count', 0)
+                    for r in data.get('results', [])[:8]:
+                        all_cases.append({
+                            "case_name": r.get('caseName', r.get('case_name', '')),
+                            "court": r.get('court', 'AR Federal'),
+                            "court_type": "Federal",
+                            "date_filed": r.get('dateFiled', r.get('date_filed', '')),
+                            "docket_number": r.get('docketNumber', r.get('docket_number', '')),
+                            "description": (r.get('snippet', '') or '')[:200],
+                        })
+                
+                # Process state appellate results
+                if not isinstance(state_resp, Exception) and state_resp.status == 200:
+                    data = await state_resp.json()
+                    total += data.get('count', 0)
+                    for r in data.get('results', [])[:8]:
+                        all_cases.append({
+                            "case_name": r.get('caseName', r.get('case_name', '')),
+                            "court": r.get('court', 'AR State'),
+                            "court_type": "State Appellate",
+                            "date_filed": r.get('dateFiled', r.get('date_filed', '')),
+                            "description": (r.get('snippet', '') or '')[:200],
+                        })
+            
+            if not all_cases:
+                return {"hit": False, "message": "No Arkansas court records found"}
+            
+            return {"hit": True, "total_records": total, "count": len(all_cases), "state": "Arkansas", "cases": all_cases}
+        except asyncio.TimeoutError:
+            return {"hit": False, "message": "Arkansas court search timeout"}
+        except Exception as e:
+            return {"hit": False, "message": f"Arkansas court error: {str(e)}"}
     
     async def _server_keepalive(self):
         """Send periodic pings from server to keep Heroku WS alive"""
