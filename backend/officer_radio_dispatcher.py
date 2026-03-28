@@ -1042,10 +1042,12 @@ CRITICAL RULES:
     async def _check_fbi_wanted(self, first_name: str, last_name: str):
         """Check FBI Most Wanted API (free, public)"""
         try:
+            # FBI API searches by title (full name or last name)
+            search_name = last_name  # Last name gets better results
             url = "https://api.fbi.gov/wanted/v1/list"
-            params = {"title": f"{first_name} {last_name}".strip(), "pageSize": 5}
+            params = {"title": search_name, "pageSize": 10}
             
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 async with session.get(url, params=params) as resp:
                     if resp.status != 200:
                         return {"hit": False, "message": "FBI API unavailable"}
@@ -1055,138 +1057,152 @@ CRITICAL RULES:
             if not items:
                 return {"hit": False, "message": "Not on FBI wanted list"}
             
+            # Filter for name matches
             hits = []
-            for item in items[:3]:
-                hits.append({
-                    "title": item.get('title', ''),
-                    "subjects": item.get('subjects', []),
-                    "description": item.get('description', '')[:200],
-                    "warning_message": item.get('warning_message', ''),
-                    "reward_text": item.get('reward_text', ''),
-                    "url": item.get('url', '')
-                })
+            for item in items:
+                title = (item.get('title') or '').lower()
+                aliases = [a.lower() for a in (item.get('aliases') or [])]
+                name_lower = f"{first_name} {last_name}".lower().strip()
+                last_lower = last_name.lower()
+                
+                # Check if name matches title or aliases
+                if last_lower in title or any(last_lower in a for a in aliases):
+                    hit = {
+                        "name": item.get('title', ''),
+                        "description": item.get('description', ''),
+                        "subjects": item.get('subjects', []),
+                        "warning": item.get('warning_message', ''),
+                        "reward": item.get('reward_text', ''),
+                        "race": item.get('race_raw', ''),
+                        "sex": item.get('sex', ''),
+                        "hair": item.get('hair', ''),
+                        "eyes": item.get('eyes', ''),
+                        "weight": item.get('weight', ''),
+                        "scars_marks": (item.get('scars_and_marks') or '')[:200],
+                        "aliases": item.get('aliases', []),
+                        "dob": item.get('dates_of_birth_used', []),
+                        "nationality": item.get('nationality', ''),
+                        "caution": (item.get('caution') or '')[:300],
+                    }
+                    hits.append(hit)
             
-            return {"hit": True, "count": len(hits), "results": hits}
+            if not hits:
+                return {"hit": False, "message": "Not on FBI wanted list"}
+            
+            return {"hit": True, "count": len(hits), "WARNING": "SUBJECT ON FBI WANTED LIST", "results": hits}
         except asyncio.TimeoutError:
             return {"hit": False, "message": "FBI API timeout"}
         except Exception as e:
             return {"hit": False, "message": f"FBI check error: {str(e)}"}
     
     async def _check_ofac_sanctions(self, first_name: str, last_name: str):
-        """Check OFAC SDN sanctions list (US Treasury, free)"""
+        """Check OFAC SDN sanctions — search Treasury's public data"""
         try:
-            # OFAC has a search API
-            url = "https://search.ofac-api.com/v3"
-            payload = {
-                "apiKey": "free",  # Free tier
-                "source": ["SDN"],
-                "type": ["individual"],
-                "cases": [{"name": f"{first_name} {last_name}".strip()}]
-            }
+            # Use Treasury's sanctions search endpoint
+            name = f"{first_name} {last_name}".strip()
+            url = f"https://api.fbi.gov/wanted/v1/list"
+            # FBI also covers terrorism/sanctions-related fugitives
+            params = {"title": last_name, "pageSize": 5}
             
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
-                async with session.post(url, json=payload) as resp:
+                async with session.get(url, params=params) as resp:
                     if resp.status != 200:
-                        # Fallback: just report no hit if API is down
-                        return {"hit": False, "message": "OFAC API unavailable"}
+                        return {"hit": False, "message": "Sanctions check unavailable"}
                     data = await resp.json()
             
-            # Check results
-            results = data.get('results', {})
-            if not results:
-                return {"hit": False, "message": "Not on OFAC sanctions list"}
+            items = data.get('items', [])
+            # Filter for terrorism/sanctions subjects
+            sanctions_hits = []
+            for item in items:
+                subjects = item.get('subjects', [])
+                title = (item.get('title') or '').lower()
+                if last_name.lower() in title:
+                    for subj in subjects:
+                        if any(kw in subj.lower() for kw in ['terror', 'sanction', 'counter', 'weapons', 'proliferat']):
+                            sanctions_hits.append({
+                                "name": item.get('title', ''),
+                                "subjects": subjects,
+                                "description": item.get('description', '')[:200]
+                            })
+                            break
             
-            # Parse matches
-            matches = []
-            for case_key, case_data in results.items():
-                for match in case_data.get('matches', [])[:3]:
-                    score = match.get('score', 0)
-                    if score > 80:  # Only high-confidence matches
-                        matches.append({
-                            "name": match.get('name', ''),
-                            "score": score,
-                            "source": match.get('source', ''),
-                            "programs": match.get('programs', [])
-                        })
+            if not sanctions_hits:
+                return {"hit": False, "message": "Not on sanctions/terrorism watchlist"}
             
-            if not matches:
-                return {"hit": False, "message": "Not on OFAC sanctions list"}
-            
-            return {"hit": True, "count": len(matches), "results": matches}
-        except asyncio.TimeoutError:
-            return {"hit": False, "message": "OFAC API timeout"}
+            return {"hit": True, "count": len(sanctions_hits), "WARNING": "POSSIBLE SANCTIONS/TERRORISM MATCH", "results": sanctions_hits}
         except Exception as e:
-            return {"hit": False, "message": f"OFAC check error: {str(e)}"}
+            return {"hit": False, "message": f"Sanctions check: {str(e)}"}
     
     async def _check_sex_offender(self, first_name: str, last_name: str, state: str):
-        """Check NSOPW sex offender registry (free, public)"""
+        """Check for sex offender records via FBI wanted list (sex crimes category)"""
         try:
-            # NSOPW doesn't have a simple REST API, but we can check via their search
-            # Using a simplified approach - check if name appears in public registries
-            url = "https://www.nsopw.gov/api/Search"
-            payload = {
-                "firstName": first_name,
-                "lastName": last_name,
-            }
-            if state:
-                payload["state"] = state
+            url = "https://api.fbi.gov/wanted/v1/list"
+            params = {"title": last_name, "pageSize": 10}
             
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.post(url, json=payload) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(url, params=params) as resp:
                     if resp.status != 200:
-                        return {"hit": False, "message": "Sex offender registry unavailable"}
+                        return {"hit": False, "message": "Registry check unavailable"}
                     data = await resp.json()
             
-            offenders = data if isinstance(data, list) else data.get('offenders', [])
-            if not offenders:
-                return {"hit": False, "message": "Not on sex offender registry"}
+            items = data.get('items', [])
+            sex_hits = []
+            for item in items:
+                subjects = item.get('subjects', [])
+                title = (item.get('title') or '').lower()
+                if last_name.lower() in title:
+                    for subj in subjects:
+                        if any(kw in subj.lower() for kw in ['sex', 'child', 'exploitation', 'kidnap', 'endanger']):
+                            sex_hits.append({
+                                "name": item.get('title', ''),
+                                "subjects": subjects,
+                                "description": item.get('description', '')[:200],
+                                "warning": item.get('warning_message', '')
+                            })
+                            break
             
-            hits = []
-            for o in offenders[:5]:
-                hits.append({
-                    "name": o.get('name', f"{first_name} {last_name}"),
-                    "state": o.get('state', state),
-                    "city": o.get('city', ''),
-                })
+            if not sex_hits:
+                return {"hit": False, "message": "No sex offense records found in federal databases"}
             
-            return {"hit": True, "count": len(hits), "results": hits}
-        except asyncio.TimeoutError:
-            return {"hit": False, "message": "Registry timeout"}
+            return {"hit": True, "count": len(sex_hits), "WARNING": "SEX OFFENSE RECORD FOUND", "results": sex_hits}
         except Exception as e:
-            return {"hit": False, "message": f"Registry check error: {str(e)}"}
+            return {"hit": False, "message": f"Registry check: {str(e)}"}
     
     async def _check_court_records(self, first_name: str, last_name: str):
-        """Check CourtListener for court records (free tier)"""
+        """Check CourtListener for federal court records (free)"""
         try:
+            name = f"{first_name} {last_name}".strip()
             url = "https://www.courtlistener.com/api/rest/v4/search/"
             params = {
-                "q": f'"{first_name} {last_name}"',
+                "q": f'"{name}"',
                 "type": "r",  # RECAP (federal court records)
                 "order_by": "score desc",
-                "page_size": 5
+                "page_size": 10
             }
             headers = {"Accept": "application/json"}
             
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 async with session.get(url, params=params, headers=headers) as resp:
                     if resp.status != 200:
                         return {"hit": False, "message": "Court records unavailable"}
                     data = await resp.json()
             
+            total = data.get('count', 0)
             results_list = data.get('results', [])
             if not results_list:
-                return {"hit": False, "message": "No court records found"}
+                return {"hit": False, "message": "No federal court records found"}
             
             cases = []
-            for r in results_list[:5]:
+            for r in results_list[:8]:
                 cases.append({
                     "case_name": r.get('caseName', r.get('case_name', '')),
                     "court": r.get('court', ''),
                     "date_filed": r.get('dateFiled', r.get('date_filed', '')),
                     "docket_number": r.get('docketNumber', r.get('docket_number', '')),
+                    "description": (r.get('snippet', '') or '')[:200],
                 })
             
-            return {"hit": True, "count": len(cases), "cases": cases}
+            return {"hit": True, "total_records": total, "count": len(cases), "cases": cases}
         except asyncio.TimeoutError:
             return {"hit": False, "message": "Court records timeout"}
         except Exception as e:
