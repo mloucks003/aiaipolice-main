@@ -104,7 +104,7 @@ Keep responses conversational (15-30 words). Show emotion and empathy. Use their
                         "silence_duration_ms": 1500  # 1.5 seconds - faster response without being too aggressive
                     },
                     "temperature": 0.9,
-                    "max_response_output_tokens": 600  # Increased to prevent mid-sentence cutoffs
+                    "max_response_output_tokens": 1000  # High to prevent mid-sentence cutoffs
                 }
             }
             
