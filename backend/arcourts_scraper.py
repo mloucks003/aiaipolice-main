@@ -22,7 +22,16 @@ async def get_browser() -> Browser:
         _playwright = await async_playwright().start()
         _browser = await _playwright.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-extensions",
+                "--no-zygote",
+                "--disable-setuid-sandbox",
+                "--js-flags=--max-old-space-size=256",
+            ]
         )
         logger.info("Playwright browser launched for ARCaseNet")
     return _browser
@@ -30,6 +39,7 @@ async def get_browser() -> Browser:
 
 async def search_participant(last_name: str, first_name: str = "", max_results: int = 20) -> dict:
     """Search ARCaseNet for a participant by name."""
+    global _browser, _playwright
     context = None
     page = None
     try:
@@ -112,6 +122,9 @@ async def search_participant(last_name: str, first_name: str = "", max_results: 
 
     except Exception as e:
         logger.error(f"ARCaseNet scraper error: {e}")
+        # Reset browser on crash so next call gets a fresh one
+        _browser = None
+        _playwright = None
         return {"found": False, "count": 0, "results": [], "message": str(e)}
     finally:
         if page:
