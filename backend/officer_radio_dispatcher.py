@@ -1246,9 +1246,8 @@ CRITICAL RULES:
             tasks.append(self._courtlistener_ar_federal(name))
             # Task 2: CourtListener - Arkansas state appellate
             tasks.append(self._courtlistener_ar_state(name))
-            # Task 3: ARCaseNet scraper (if configured)
-            if ARCOURTS_SCRAPER_URL:
-                tasks.append(self._arcasenet_search(first_name, last_name))
+            # Task 3: ARCaseNet scraper (local Playwright)
+            tasks.append(self._arcasenet_search(first_name, last_name))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
@@ -1316,15 +1315,10 @@ CRITICAL RULES:
             return {"cases": [], "total": 0}
     
     async def _arcasenet_search(self, first_name: str, last_name: str):
-        """Search ARCaseNet via the Playwright scraper microservice"""
+        """Search ARCaseNet via local Playwright scraper"""
         try:
-            url = f"{ARCOURTS_SCRAPER_URL}/search/participant"
-            params = {"last_name": last_name, "first_name": first_name, "max_results": 20}
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25)) as session:
-                async with session.get(url, params=params) as resp:
-                    if resp.status != 200:
-                        return {"cases": [], "total": 0}
-                    data = await resp.json()
+            from arcourts_scraper import search_participant
+            data = await search_participant(last_name, first_name, max_results=20)
             
             cases = []
             for r in data.get('results', []):
