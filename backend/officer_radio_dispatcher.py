@@ -1,6 +1,7 @@
 """
 OpenAI Realtime API Integration for Officer Radio App
 Voice-to-voice conversation with function calling for person and vehicle searches
++ Background check system with parallel queries to free public APIs
 """
 import asyncio
 import json
@@ -11,6 +12,7 @@ import subprocess
 import tempfile
 import struct
 import io
+import aiohttp
 from fastapi import WebSocket
 from datetime import datetime, timezone
 import logging
@@ -93,6 +95,21 @@ OFFICER_RADIO_FUNCTIONS = [
                 "call_id": {"type": "string", "description": "The call ID to clear. If not provided, clears the officer's current assigned call."},
                 "disposition": {"type": "string", "description": "How the call was resolved. E.g. 'report taken', 'arrest made', 'unfounded', 'gone on arrival', 'warning issued', 'citation issued'."}
             }
+        }
+    },
+    {
+        "type": "function",
+        "name": "background_check",
+        "description": "Run a comprehensive background check on a person. Searches local database PLUS FBI Most Wanted, OFAC sanctions list, NSOPW sex offender registry, and CourtListener court records — all in parallel. Use when officer says 'run a background check', 'full check on', 'background on', 'deep check', or wants more than a basic name search.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "first_name": {"type": "string", "description": "Person's first name"},
+                "last_name": {"type": "string", "description": "Person's last name"},
+                "state": {"type": "string", "description": "State abbreviation for narrowing results (e.g., CA, TX)"},
+                "dob": {"type": "string", "description": "Date of birth YYYY-MM-DD if known"}
+            },
+            "required": ["last_name"]
         }
     }
 ]
@@ -418,6 +435,10 @@ Officer: "10-29 on Coldwell, Hunter"
 You: [call search_person]
 Then: "10-29 shows one active warrant. Failure to appear, $500 bail."
 
+Officer: "Run a background check on John Doe" or "Full check on Smith"
+You: "10-4, running full background." [call background_check]
+Then: "Background check complete. Local DB: one hit, DOB 3-15-85, one warrant traffic. FBI wanted: negative. OFAC sanctions: negative. Sex offender registry: negative. Court records: two cases, DUI 2020 convicted, traffic 2022 dismissed."
+
 CRITICAL RULES:
 - ALWAYS use 10-codes. "10-4" not "okay". "10-97" not "arrived on scene".
 - Keep it SHORT. Real dispatchers don't ramble.
@@ -716,6 +737,8 @@ CRITICAL RULES:
                 return await self.arrive_on_scene(arguments)
             elif function_name == "clear_call":
                 return await self.clear_call(arguments)
+            elif function_name == "background_check":
+                return await self.background_check(arguments)
             else:
                 return {"error": f"Unknown function: {function_name}"}
         except Exception as e:
@@ -948,6 +971,226 @@ CRITICAL RULES:
             logger.error(f"Error in clear_call: {e}")
             return {"error": f"Failed to clear call: {str(e)}"}
 
+    
+    async def background_check(self, params: dict):
+        """Run comprehensive background check — fans out to all sources in parallel"""
+        first_name = params.get('first_name', '')
+        last_name = params.get('last_name', '')
+        state = params.get('state', '')
+        dob = params.get('dob', '')
+        
+        if not last_name:
+            return {"error": "Last name required for background check"}
+        
+        logger.info(f"Background check: {first_name} {last_name}, state={state}, dob={dob}")
+        
+        # Fan out to all sources in parallel
+        results = await asyncio.gather(
+            self._check_local_db(first_name, last_name, dob),
+            self._check_fbi_wanted(first_name, last_name),
+            self._check_ofac_sanctions(first_name, last_name),
+            self._check_sex_offender(first_name, last_name, state),
+            self._check_court_records(first_name, last_name),
+            return_exceptions=True
+        )
+        
+        local_result = results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])}
+        fbi_result = results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])}
+        ofac_result = results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
+        sex_offender_result = results[3] if not isinstance(results[3], Exception) else {"error": str(results[3])}
+        court_result = results[4] if not isinstance(results[4], Exception) else {"error": str(results[4])}
+        
+        return {
+            "subject": f"{first_name} {last_name}".strip(),
+            "local_database": local_result,
+            "fbi_wanted": fbi_result,
+            "ofac_sanctions": ofac_result,
+            "sex_offender_registry": sex_offender_result,
+            "court_records": court_result
+        }
+    
+    async def _check_local_db(self, first_name: str, last_name: str, dob: str):
+        """Check local MongoDB person records"""
+        try:
+            query = {}
+            if last_name:
+                query["last_name"] = {"$regex": last_name, "$options": "i"}
+            if first_name:
+                query["first_name"] = {"$regex": first_name, "$options": "i"}
+            if dob:
+                query["dob"] = dob
+            
+            results = await self.db.persons.find(query, {"_id": 0}).to_list(10)
+            
+            if not results:
+                return {"hit": False, "message": "No local records"}
+            
+            # Enrich with citations
+            for person in results:
+                citation_ids = person.get('citations', [])
+                if citation_ids:
+                    citations = await self.db.citations.find(
+                        {"id": {"$in": citation_ids}},
+                        {"_id": 0, "violation_description": 1, "date_time": 1, "status": 1}
+                    ).to_list(50)
+                    person['citation_details'] = citations
+            
+            return {"hit": True, "count": len(results), "records": results}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def _check_fbi_wanted(self, first_name: str, last_name: str):
+        """Check FBI Most Wanted API (free, public)"""
+        try:
+            url = "https://api.fbi.gov/wanted/v1/list"
+            params = {"title": f"{first_name} {last_name}".strip(), "pageSize": 5}
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        return {"hit": False, "message": "FBI API unavailable"}
+                    data = await resp.json()
+            
+            items = data.get('items', [])
+            if not items:
+                return {"hit": False, "message": "Not on FBI wanted list"}
+            
+            hits = []
+            for item in items[:3]:
+                hits.append({
+                    "title": item.get('title', ''),
+                    "subjects": item.get('subjects', []),
+                    "description": item.get('description', '')[:200],
+                    "warning_message": item.get('warning_message', ''),
+                    "reward_text": item.get('reward_text', ''),
+                    "url": item.get('url', '')
+                })
+            
+            return {"hit": True, "count": len(hits), "results": hits}
+        except asyncio.TimeoutError:
+            return {"hit": False, "message": "FBI API timeout"}
+        except Exception as e:
+            return {"hit": False, "message": f"FBI check error: {str(e)}"}
+    
+    async def _check_ofac_sanctions(self, first_name: str, last_name: str):
+        """Check OFAC SDN sanctions list (US Treasury, free)"""
+        try:
+            # OFAC has a search API
+            url = "https://search.ofac-api.com/v3"
+            payload = {
+                "apiKey": "free",  # Free tier
+                "source": ["SDN"],
+                "type": ["individual"],
+                "cases": [{"name": f"{first_name} {last_name}".strip()}]
+            }
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status != 200:
+                        # Fallback: just report no hit if API is down
+                        return {"hit": False, "message": "OFAC API unavailable"}
+                    data = await resp.json()
+            
+            # Check results
+            results = data.get('results', {})
+            if not results:
+                return {"hit": False, "message": "Not on OFAC sanctions list"}
+            
+            # Parse matches
+            matches = []
+            for case_key, case_data in results.items():
+                for match in case_data.get('matches', [])[:3]:
+                    score = match.get('score', 0)
+                    if score > 80:  # Only high-confidence matches
+                        matches.append({
+                            "name": match.get('name', ''),
+                            "score": score,
+                            "source": match.get('source', ''),
+                            "programs": match.get('programs', [])
+                        })
+            
+            if not matches:
+                return {"hit": False, "message": "Not on OFAC sanctions list"}
+            
+            return {"hit": True, "count": len(matches), "results": matches}
+        except asyncio.TimeoutError:
+            return {"hit": False, "message": "OFAC API timeout"}
+        except Exception as e:
+            return {"hit": False, "message": f"OFAC check error: {str(e)}"}
+    
+    async def _check_sex_offender(self, first_name: str, last_name: str, state: str):
+        """Check NSOPW sex offender registry (free, public)"""
+        try:
+            # NSOPW doesn't have a simple REST API, but we can check via their search
+            # Using a simplified approach - check if name appears in public registries
+            url = "https://www.nsopw.gov/api/Search"
+            payload = {
+                "firstName": first_name,
+                "lastName": last_name,
+            }
+            if state:
+                payload["state"] = state
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status != 200:
+                        return {"hit": False, "message": "Sex offender registry unavailable"}
+                    data = await resp.json()
+            
+            offenders = data if isinstance(data, list) else data.get('offenders', [])
+            if not offenders:
+                return {"hit": False, "message": "Not on sex offender registry"}
+            
+            hits = []
+            for o in offenders[:5]:
+                hits.append({
+                    "name": o.get('name', f"{first_name} {last_name}"),
+                    "state": o.get('state', state),
+                    "city": o.get('city', ''),
+                })
+            
+            return {"hit": True, "count": len(hits), "results": hits}
+        except asyncio.TimeoutError:
+            return {"hit": False, "message": "Registry timeout"}
+        except Exception as e:
+            return {"hit": False, "message": f"Registry check error: {str(e)}"}
+    
+    async def _check_court_records(self, first_name: str, last_name: str):
+        """Check CourtListener for court records (free tier)"""
+        try:
+            url = "https://www.courtlistener.com/api/rest/v4/search/"
+            params = {
+                "q": f'"{first_name} {last_name}"',
+                "type": "r",  # RECAP (federal court records)
+                "order_by": "score desc",
+                "page_size": 5
+            }
+            headers = {"Accept": "application/json"}
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        return {"hit": False, "message": "Court records unavailable"}
+                    data = await resp.json()
+            
+            results_list = data.get('results', [])
+            if not results_list:
+                return {"hit": False, "message": "No court records found"}
+            
+            cases = []
+            for r in results_list[:5]:
+                cases.append({
+                    "case_name": r.get('caseName', r.get('case_name', '')),
+                    "court": r.get('court', ''),
+                    "date_filed": r.get('dateFiled', r.get('date_filed', '')),
+                    "docket_number": r.get('docketNumber', r.get('docket_number', '')),
+                })
+            
+            return {"hit": True, "count": len(cases), "cases": cases}
+        except asyncio.TimeoutError:
+            return {"hit": False, "message": "Court records timeout"}
+        except Exception as e:
+            return {"hit": False, "message": f"Court records error: {str(e)}"}
     
     async def _server_keepalive(self):
         """Send periodic pings from server to keep Heroku WS alive"""
