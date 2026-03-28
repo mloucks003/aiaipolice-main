@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
+ARCOURTS_SCRAPER_URL = os.environ.get('ARCOURTS_SCRAPER_URL', '')  # Railway scraper service URL
 
 # Function definitions for OpenAI Realtime API
 OFFICER_RADIO_FUNCTIONS = [
@@ -1233,76 +1234,113 @@ CRITICAL RULES:
             return {"hit": False, "message": f"Court records error: {str(e)}"}
     
     async def _check_arkansas_courts(self, first_name: str, last_name: str):
-        """Check Arkansas state and federal courts via CourtListener"""
+        """Check Arkansas state and federal courts via CourtListener + ARCaseNet scraper"""
         try:
             name = f"{first_name} {last_name}".strip()
             all_cases = []
             total = 0
             
-            # Search 1: Arkansas federal courts (Eastern + Western District)
-            federal_url = "https://www.courtlistener.com/api/rest/v4/search/"
-            federal_params = {
-                "q": f'"{name}"',
-                "type": "r",
-                "court": "arwd ared",
-                "order_by": "score desc",
-                "page_size": 10
-            }
+            tasks = []
             
-            # Search 2: Arkansas state appellate courts (Court of Appeals + Supreme Court)
-            state_url = "https://www.courtlistener.com/api/rest/v4/search/"
-            state_params = {
-                "q": f'"{name}"',
-                "type": "o",
-                "court": "arkctapp arksupremecourt",
-                "order_by": "score desc",
-                "page_size": 10
-            }
+            # Task 1: CourtListener - Arkansas federal courts
+            tasks.append(self._courtlistener_ar_federal(name))
+            # Task 2: CourtListener - Arkansas state appellate
+            tasks.append(self._courtlistener_ar_state(name))
+            # Task 3: ARCaseNet scraper (if configured)
+            if ARCOURTS_SCRAPER_URL:
+                tasks.append(self._arcasenet_search(first_name, last_name))
             
-            headers = {"Accept": "application/json"}
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
-                # Run both searches in parallel
-                federal_task = session.get(federal_url, params=federal_params, headers=headers)
-                state_task = session.get(state_url, params=state_params, headers=headers)
-                
-                federal_resp, state_resp = await asyncio.gather(federal_task, state_task, return_exceptions=True)
-                
-                # Process federal results
-                if not isinstance(federal_resp, Exception) and federal_resp.status == 200:
-                    data = await federal_resp.json()
-                    total += data.get('count', 0)
-                    for r in data.get('results', [])[:8]:
-                        all_cases.append({
-                            "case_name": r.get('caseName', r.get('case_name', '')),
-                            "court": r.get('court', 'AR Federal'),
-                            "court_type": "Federal",
-                            "date_filed": r.get('dateFiled', r.get('date_filed', '')),
-                            "docket_number": r.get('docketNumber', r.get('docket_number', '')),
-                            "description": (r.get('snippet', '') or '')[:200],
-                        })
-                
-                # Process state appellate results
-                if not isinstance(state_resp, Exception) and state_resp.status == 200:
-                    data = await state_resp.json()
-                    total += data.get('count', 0)
-                    for r in data.get('results', [])[:8]:
-                        all_cases.append({
-                            "case_name": r.get('caseName', r.get('case_name', '')),
-                            "court": r.get('court', 'AR State'),
-                            "court_type": "State Appellate",
-                            "date_filed": r.get('dateFiled', r.get('date_filed', '')),
-                            "description": (r.get('snippet', '') or '')[:200],
-                        })
+            for r in results:
+                if isinstance(r, Exception):
+                    continue
+                if isinstance(r, dict):
+                    all_cases.extend(r.get("cases", []))
+                    total += r.get("total", r.get("count", 0))
             
             if not all_cases:
                 return {"hit": False, "message": "No Arkansas court records found"}
             
             return {"hit": True, "total_records": total, "count": len(all_cases), "state": "Arkansas", "cases": all_cases}
-        except asyncio.TimeoutError:
-            return {"hit": False, "message": "Arkansas court search timeout"}
         except Exception as e:
             return {"hit": False, "message": f"Arkansas court error: {str(e)}"}
+    
+    async def _courtlistener_ar_federal(self, name: str):
+        """CourtListener Arkansas federal courts"""
+        try:
+            url = "https://www.courtlistener.com/api/rest/v4/search/"
+            params = {"q": f'"{name}"', "type": "r", "court": "arwd ared", "order_by": "score desc", "page_size": 10}
+            headers = {"Accept": "application/json"}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        return {"cases": [], "total": 0}
+                    data = await resp.json()
+            cases = []
+            for r in data.get('results', [])[:8]:
+                cases.append({
+                    "case_name": r.get('caseName', r.get('case_name', '')),
+                    "court": r.get('court', 'AR Federal'),
+                    "court_type": "Federal",
+                    "date_filed": r.get('dateFiled', r.get('date_filed', '')),
+                    "docket_number": r.get('docketNumber', r.get('docket_number', '')),
+                    "description": (r.get('snippet', '') or '')[:200],
+                })
+            return {"cases": cases, "total": data.get('count', 0)}
+        except:
+            return {"cases": [], "total": 0}
+    
+    async def _courtlistener_ar_state(self, name: str):
+        """CourtListener Arkansas state appellate courts"""
+        try:
+            url = "https://www.courtlistener.com/api/rest/v4/search/"
+            params = {"q": f'"{name}"', "type": "o", "court": "arkctapp arksupremecourt", "order_by": "score desc", "page_size": 10}
+            headers = {"Accept": "application/json"}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        return {"cases": [], "total": 0}
+                    data = await resp.json()
+            cases = []
+            for r in data.get('results', [])[:8]:
+                cases.append({
+                    "case_name": r.get('caseName', r.get('case_name', '')),
+                    "court": r.get('court', 'AR State'),
+                    "court_type": "State Appellate",
+                    "date_filed": r.get('dateFiled', r.get('date_filed', '')),
+                    "description": (r.get('snippet', '') or '')[:200],
+                })
+            return {"cases": cases, "total": data.get('count', 0)}
+        except:
+            return {"cases": [], "total": 0}
+    
+    async def _arcasenet_search(self, first_name: str, last_name: str):
+        """Search ARCaseNet via the Playwright scraper microservice"""
+        try:
+            url = f"{ARCOURTS_SCRAPER_URL}/search/participant"
+            params = {"last_name": last_name, "first_name": first_name, "max_results": 20}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25)) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        return {"cases": [], "total": 0}
+                    data = await resp.json()
+            
+            cases = []
+            for r in data.get('results', []):
+                cases.append({
+                    "case_name": r.get('case_description', r.get('name', '')),
+                    "court": r.get('case_type', 'AR Circuit Court'),
+                    "court_type": "ARCaseNet",
+                    "case_number": r.get('case_number', ''),
+                    "date_filed": r.get('filing_date', ''),
+                    "status": r.get('status', ''),
+                    "party_type": r.get('party_type', ''),
+                })
+            return {"cases": cases, "total": data.get('total', len(cases))}
+        except Exception as e:
+            logger.warning(f"ARCaseNet scraper error: {e}")
+            return {"cases": [], "total": 0}
     
     async def _server_keepalive(self):
         """Send periodic pings from server to keep Heroku WS alive"""
