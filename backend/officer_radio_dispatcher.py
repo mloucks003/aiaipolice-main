@@ -474,7 +474,7 @@ CRITICAL RULES:
 - If multiple results, ask which person the officer means.
 - After giving results, offer to provide more details.
 - Spell out license plates phonetically: "Adam-Boy-Charlie-1-2-3".""",
-                    "voice": "alloy",
+                    "voice": "shimmer",
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
                     "input_audio_transcription": {

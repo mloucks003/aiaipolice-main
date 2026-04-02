@@ -91,7 +91,7 @@ TONE EXAMPLES:
 - Use name at key moments: "Okay [Name], officers are on their way to you now."
 
 Keep responses conversational (15-30 words). Show emotion and empathy. Use their name sparingly but meaningfully.""",
-                    "voice": "alloy",
+                    "voice": "shimmer",
                     "input_audio_format": "g711_ulaw",
                     "output_audio_format": "g711_ulaw",
                     "input_audio_transcription": {
